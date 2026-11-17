@@ -36,7 +36,7 @@ _TBD: filled in once the challenge prompt arrives._
 npm run zip
 ```
 
-Creates `../sutton-submission.zip` with the source and the `.git` folder. It leaves out `node_modules` and `dist`.
+Creates `../sutton-submission.zip` with the source and the `.git` folder. It leaves out `node_modules`, `dist`, `data/` (your local store) and `.env` (your API key).
 
 ## How we worked
 

@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "zip": "rm -f ../sutton-submission.zip && zip -rq ../sutton-submission.zip . -x 'node_modules/*' 'dist/*' '.DS_Store' && echo 'Created ../sutton-submission.zip'"
+    "zip": "rm -f ../sutton-submission.zip && zip -rq ../sutton-submission.zip . -x 'node_modules/*' 'dist/*' 'data/*' '.env' '*.DS_Store' && echo 'Created ../sutton-submission.zip'"
   },
   "dependencies": {
     "dotenv": "^18.0.10",
