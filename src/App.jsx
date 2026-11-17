@@ -71,20 +71,31 @@ export default function App() {
   const reset = () => { setStep(0); setResult(null); setRows([]); refreshExisting() }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
-      <header className="border-b bg-white">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-semibold">Inventory Import</h1>
-          <ol className="flex gap-4 text-sm">
+    <div className="min-h-screen text-slate-900">
+      <header className="sticky top-0 z-30 bg-slate-950 text-white">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center gap-8">
+          <div className="flex items-center gap-2.5 shrink-0">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+              <path d="m3 7 9 5 9-5M12 12v10" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" opacity=".55" />
+            </svg>
+            <span className="font-medium tracking-tight">Sutton<span className="text-slate-500"> / Import</span></span>
+          </div>
+          <ol className="hidden md:flex items-center gap-1 text-sm ml-auto">
             {STEPS.map((s, i) => (
-              <li key={s} className={i === step ? 'font-semibold text-blue-600' : i < step ? 'text-slate-600' : 'text-slate-400'}>
-                {i + 1}. {s}
+              <li key={s} className="flex items-center gap-1">
+                {i > 0 && <span className={`w-6 h-px ${i <= step ? 'bg-white/60' : 'bg-white/15'}`} />}
+                <span className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-colors ${i === step ? 'bg-white text-slate-950' : i < step ? 'text-white/80' : 'text-white/35'}`}>
+                  <span className="font-mono text-[11px]">{i < step ? '✓' : String(i + 1).padStart(2, '0')}</span>{s}
+                </span>
               </li>
             ))}
           </ol>
+          <span className="md:hidden ml-auto label text-white/60">{String(step + 1).padStart(2, '0')} / {String(STEPS.length).padStart(2, '0')}</span>
         </div>
+        <div className="h-0.5 bg-white/10"><div className="h-full bg-gradient-to-r from-sky-400 via-violet-400 to-emerald-400 seg" style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} /></div>
       </header>
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main key={step} className="max-w-7xl mx-auto px-6 py-10 animate-rise">
         {step === 0 && <Upload onText={loadText} existingCount={existingSkus.size} />}
         {step === 1 && (
           <MapColumns aiMap={aiMap} fileName={fileName} headers={headers} sample={csvRows[0]} mapping={mapping}
@@ -104,23 +115,52 @@ function Upload({ onText, existingCount }) {
   const [drag, setDrag] = useState(false)
   const readFile = (f) => f && f.text().then((t) => onText(t, f.name))
   const loadSample = (name) => fetch(`/samples/${name}`).then((r) => r.text()).then((t) => onText(t, name))
+  const steps = [
+    ['Map', 'We match your column names to ours, with AI for the odd ones.'],
+    ['Fix', 'Safe fixes happen automatically. You approve anything we guessed.'],
+    ['Trust', 'Only clean rows import. You get a list of everything that didn\'t.'],
+  ]
   return (
-    <div className="space-y-6">
-      <label
-        onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={(e) => { e.preventDefault(); setDrag(false); readFile(e.dataTransfer.files[0]) }}
-        className={`block border-2 border-dashed rounded-xl p-16 text-center cursor-pointer bg-white ${drag ? 'border-blue-500 bg-blue-50' : 'border-slate-300'}`}
-      >
-        <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => readFile(e.target.files[0])} />
-        <p className="text-lg font-medium">Drop your inventory CSV here</p>
-        <p className="text-slate-500 mt-1">or click to choose a file</p>
-      </label>
-      <div className="text-sm text-slate-600 flex gap-3 items-center">
-        Try a sample:
-        <button className="underline text-blue-600" onClick={() => loadSample('items_clean.csv')}>clean file</button>
-        <button className="underline text-blue-600" onClick={() => loadSample('items_messy.csv')}>messy file</button>
-        <span className="ml-auto">{existingCount} items already in the system</span>
+    <div className="grid lg:grid-cols-[1fr_1.1fr] gap-12 items-center min-h-[calc(100vh-10rem)] stagger">
+      <div className="space-y-6">
+        <span className="label text-slate-500">Bulk import · Inventory items</span>
+        <h1 className="text-5xl md:text-6xl font-medium tracking-[-0.035em] leading-[0.98]">
+          Bring the spreadsheet.<br /><span className="text-slate-400">We'll handle the mess.</span>
+        </h1>
+        <p className="text-lg text-slate-600 max-w-md leading-relaxed">
+          Drop in your inventory file as it is. Renamed columns, odd formats and duplicate SKUs are all fine. You'll know exactly what got in.
+        </p>
+        <ul className="space-y-3 pt-2">
+          {steps.map(([t, d], i) => (
+            <li key={t} className="flex gap-4 items-baseline">
+              <span className="font-mono text-xs text-slate-400 w-6">{String(i + 1).padStart(2, '0')}</span>
+              <span><span className="font-medium">{t}.</span> <span className="text-slate-600">{d}</span></span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="space-y-4">
+        <label
+          onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); readFile(e.dataTransfer.files[0]) }}
+          className={`dropzone-ring ${drag ? 'is-drag scale-[1.01]' : ''} group block rounded-3xl px-10 py-20 text-center cursor-pointer shadow-[0_1px_2px_rgba(15,23,42,.04),0_24px_48px_-24px_rgba(15,23,42,.18)] transition-transform duration-300 focus-within:ring-2 focus-within:ring-violet-400`}
+        >
+          <input type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => readFile(e.target.files[0])} />
+          <div className="mx-auto mb-6 w-14 h-14 rounded-2xl bg-slate-950 text-white grid place-items-center transition-transform duration-300 group-hover:-translate-y-1">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <p className="text-xl font-medium tracking-tight">{drag ? 'Drop it.' : 'Drop your inventory CSV here'}</p>
+          <p className="text-slate-500 mt-1.5">or <span className="text-slate-900 underline underline-offset-4 decoration-slate-300">browse your computer</span></p>
+        </label>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-slate-500 mr-1">No file handy?</span>
+          <button className="px-3 py-1.5 rounded-full border border-slate-200 bg-white hover:border-slate-400 transition-colors" onClick={() => loadSample('items_clean.csv')}>Clean sample</button>
+          <button className="px-3 py-1.5 rounded-full border border-slate-200 bg-white hover:border-slate-400 transition-colors" onClick={() => loadSample('items_messy.csv')}>Messy sample</button>
+          <span className="ml-auto label text-slate-400">{existingCount} items in system</span>
+        </div>
       </div>
     </div>
   )
@@ -131,19 +171,19 @@ function MapColumns({ aiMap, fileName, headers, sample, mapping, setMapping, onB
   const missingRequired = FIELDS.filter((f) => f.required && !used.includes(f.key))
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Map the columns in <span className="font-mono">{fileName}</span></h2>
+      <h2 className="text-3xl font-medium tracking-tight">Map the columns in <span className="font-mono">{fileName}</span></h2>
       <p className="text-slate-600 text-sm">We matched your columns automatically. Change any that look wrong.</p>
       {aiMap.busy && <div className="bg-violet-50 border border-violet-200 rounded-lg px-4 py-2 text-sm text-violet-900">🤖 AI is looking at the columns we couldn't match…</div>}
       {aiMap.msg && aiMap.msg !== 'off' && <div className="bg-slate-100 rounded-lg px-4 py-2 text-sm text-slate-600">AI column matching unavailable ({aiMap.msg}). You can pick fields by hand.</div>}
-      <table className="w-full bg-white rounded-lg shadow-sm text-sm">
-        <thead className="text-left text-slate-500"><tr><th className="p-3">Your column</th><th className="p-3">Example value</th><th className="p-3">Imports as</th></tr></thead>
+      <table className="w-full bg-white rounded-2xl border border-slate-200 shadow-sm text-sm overflow-hidden">
+        <thead className="text-left text-slate-500 bg-slate-50"><tr><th className="p-3 label font-normal">Your column</th><th className="p-3 label font-normal">Example value</th><th className="p-3 label font-normal">Imports as</th></tr></thead>
         <tbody>
           {headers.map((h) => (
             <tr key={h} className="border-t">
               <td className="p-3 font-mono">{h}</td>
               <td className="p-3 text-slate-500 truncate max-w-xs">{String(sample?.[h] ?? '').slice(0, 60)}</td>
               <td className="p-3">
-                <select className="border rounded px-2 py-1" value={mapping[h] ?? ''}
+                <select className="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-violet-400" value={mapping[h] ?? ''}
                   onChange={(e) => setMapping({ ...mapping, [h]: e.target.value || null })}>
                   <option value="">— Don't import —</option>
                   {FIELDS.map((f) => (
@@ -169,8 +209,8 @@ function MapColumns({ aiMap, fileName, headers, sample, mapping, setMapping, onB
         <p className="text-amber-700 text-sm">Required fields not mapped: {missingRequired.map((f) => f.label).join(', ')}. Those rows will need values in the next step.</p>
       )}
       <div className="flex gap-3">
-        <button className="px-4 py-2 rounded border" onClick={onBack}>Back</button>
-        <button className="px-4 py-2 rounded bg-blue-600 text-white" onClick={onNext}>Continue</button>
+        <button className="px-5 py-2.5 rounded-full border border-slate-300 bg-white hover:border-slate-500 transition-colors" onClick={onBack}>Back</button>
+        <button className="px-5 py-2.5 rounded-full bg-slate-950 text-white font-medium hover:bg-slate-800 transition-colors shadow-sm" onClick={onNext}>Continue</button>
       </div>
     </div>
   )
@@ -342,14 +382,26 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
   }
 
   const tab = (key, label, onClick) => (
-    <button className={`px-3 py-1 rounded ${filter === key ? 'bg-slate-800 text-white' : 'border bg-white'}`} onClick={onClick || (() => setFilter(key))}>{label}</button>
+    <button className={`px-3.5 py-1.5 rounded-full transition-colors ${filter === key ? 'bg-slate-950 text-white' : 'border border-slate-200 bg-white hover:border-slate-400'}`} onClick={onClick || (() => setFilter(key))}>{label}</button>
   )
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-4 flex-wrap">
-        <div className="text-lg"><span className="font-semibold text-green-700">{readyCount} ready</span>{' · '}
-          <span className="font-semibold text-red-600">{attentionCount} need attention</span>{' · '}{rows.length} rows</div>
+      <div className="flex items-end gap-6 flex-wrap">
+        <div className="space-y-3 min-w-[280px] flex-1 max-w-xl">
+          <div className="flex items-baseline gap-3">
+            <span className="text-4xl font-medium tracking-tight tabular-nums">{readyCount}<span className="text-slate-400">/{rows.length}</span></span>
+            <span className="text-slate-600">rows ready to import</span>
+          </div>
+          <div className="flex h-2 rounded-full overflow-hidden bg-slate-200" role="img" aria-label={`${readyCount} ready, ${attentionCount} need attention`}>
+            <div className="seg bg-emerald-500" style={{ width: `${(readyCount / Math.max(rows.length, 1)) * 100}%` }} />
+            <div className="seg bg-red-400" style={{ width: `${(attentionCount / Math.max(rows.length, 1)) * 100}%` }} />
+          </div>
+          <div className="flex gap-4 text-xs text-slate-500">
+            <span className="flex items-center gap-1.5"><i className="w-2 h-2 rounded-full bg-emerald-500" />{readyCount} ready</span>
+            <span className="flex items-center gap-1.5"><i className="w-2 h-2 rounded-full bg-red-400" />{attentionCount} need attention</span>
+          </div>
+        </div>
         <div className="ml-auto flex gap-2 text-sm">
           {tab('errors', `Needs attention (${attentionCount})`, showErrors)}
           {dupItems > 0 && tab('dups', `Duplicates (${dupItems})`)}
@@ -359,7 +411,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
         </div>
       </div>
       {dupGroups.length > 0 && (
-        <div className="bg-orange-50 border-2 border-orange-400 rounded-lg px-4 py-3 flex items-center gap-4 flex-wrap">
+        <div className="bg-orange-50 border-2 border-orange-400 rounded-xl px-4 py-2.5 flex items-center gap-x-4 gap-y-2 flex-wrap">
           <div>
             <div className="font-semibold text-orange-900">⚠ {dupGroups.length} SKU{dupGroups.length > 1 ? 's are' : ' is'} shared by {dupItems} items</div>
             <div className="text-sm text-orange-900">A SKU must be unique{dupGroups.some((g) => g.existing) ? ' (some already exist in the system)' : ''}. These rows can't import until each one is resolved.</div>
@@ -372,7 +424,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
         </div>
       )}
       {(aiTargets.length > 0 || aiTotal > 0) && (
-        <div className="bg-violet-50 border-2 border-violet-300 rounded-lg px-4 py-3 flex items-center gap-4 flex-wrap">
+        <div className="bg-violet-50 border-2 border-violet-300 rounded-xl px-4 py-2.5 flex items-center gap-x-4 gap-y-2 flex-wrap">
           <div>
             <div className="font-semibold text-violet-900">🤖 {aiTotal > 0
               ? `${aiTotal} AI suggestion${aiTotal > 1 ? 's' : ''} waiting for your approval`
@@ -396,7 +448,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
         </div>
       )}
       {pendingTotal > 0 && (
-        <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg px-4 py-3 flex items-center gap-4 flex-wrap">
+        <div className="bg-emerald-50 border-2 border-emerald-300 rounded-xl px-4 py-2.5 flex items-center gap-x-4 gap-y-2 flex-wrap">
           <div>
             <div className="font-semibold text-emerald-800">✨ We fixed {pendingTotal} values in {pendingRows} rows for you</div>
             <div className="text-sm text-emerald-900">Spacing, casing, $ signs, number and date formats, yes/no values.
@@ -408,7 +460,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
           </div>
         </div>
       )}
-      <div className="overflow-auto max-h-[65vh] bg-white rounded-lg shadow-sm">
+      <div className="overflow-auto max-h-[65vh] bg-white rounded-2xl border border-slate-200 shadow-sm">
         <table className="text-xs">
           <thead className="sticky top-0 bg-slate-100 text-left z-10">
             <tr><th className="p-2">Row</th><th className="p-2">Status</th>{FIELDS.map((f) => <th key={f.key} className="p-2 whitespace-nowrap">{f.label}{f.required ? ' *' : ''}</th>)}<th /></tr>
@@ -482,8 +534,8 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
         </table>
       </div>
       <div className="flex gap-3 items-center">
-        <button className="px-4 py-2 rounded border" onClick={onBack}>Back</button>
-        <button disabled={!readyCount || busy} className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50" onClick={doImport}>
+        <button className="px-5 py-2.5 rounded-full border border-slate-300 bg-white hover:border-slate-500 transition-colors" onClick={onBack}>Back</button>
+        <button disabled={!readyCount || busy} className="px-5 py-2.5 rounded-full bg-slate-950 text-white font-medium hover:bg-slate-800 transition-colors shadow-sm disabled:opacity-50" onClick={doImport}>
           {busy ? 'Importing…' : `Import ${readyCount} item${readyCount === 1 ? '' : 's'}`}
         </button>
         {attentionCount > 0 && <span className="text-sm text-slate-600">{attentionCount} rows will be held back. You can fix them now, or import the ready ones and download the rest afterwards.</span>}
@@ -503,16 +555,21 @@ function Results({ result, onRestart }) {
   }
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-green-50 border border-green-200 rounded-lg p-6"><div className="text-3xl font-semibold text-green-700">{result.imported.length}</div><div>items imported</div></div>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6"><div className="text-3xl font-semibold text-red-600">{skipped.length + result.rejected.length}</div><div>rows not imported</div></div>
+      <div className="space-y-2">
+        <span className="label text-slate-500">Import complete</span>
+        <h2 className="text-4xl md:text-5xl font-medium tracking-[-0.03em]">{result.imported.length} items are in.</h2>
+        <p className="text-slate-600">{skipped.length + result.rejected.length > 0 ? 'Here is exactly what got in, and what didn\'t and why.' : 'Everything in the file was imported.'}</p>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4 stagger">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm"><span className="label text-emerald-700">Imported</span><div className="text-5xl font-medium tracking-tight tabular-nums mt-2">{result.imported.length}</div></div>
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm"><span className="label text-red-600">Not imported</span><div className="text-5xl font-medium tracking-tight tabular-nums mt-2">{skipped.length + result.rejected.length}</div></div>
       </div>
       {result.imported.length > 0 && (
-        <details className="bg-white rounded-lg p-4 shadow-sm"><summary className="cursor-pointer font-medium">Imported SKUs</summary>
+        <details className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm"><summary className="cursor-pointer font-medium">Imported SKUs</summary>
           <p className="font-mono text-xs mt-2">{result.imported.join(', ')}</p></details>
       )}
       {skipped.length > 0 && (
-        <div className="bg-white rounded-lg p-4 shadow-sm space-y-2">
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2">
           <div className="flex items-center"><h3 className="font-medium">Not imported</h3>
             <button className="ml-auto text-sm underline text-blue-600" onClick={downloadSkipped}>Download as CSV</button></div>
           <ul className="text-sm space-y-1 max-h-80 overflow-auto">
@@ -522,7 +579,7 @@ function Results({ result, onRestart }) {
           </ul>
         </div>
       )}
-      <button className="px-4 py-2 rounded bg-blue-600 text-white" onClick={onRestart}>Import another file</button>
+      <button className="px-5 py-2.5 rounded-full bg-slate-950 text-white font-medium hover:bg-slate-800 transition-colors shadow-sm" onClick={onRestart}>Import another file</button>
     </div>
   )
 }

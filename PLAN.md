@@ -60,7 +60,7 @@ An ops admin. Not a developer. Used to Excel. Wants confidence, not JSON.
 - [x] Download rejected rows as CSV (done in Phase 1)
 
 ### Phase 3: Make it pretty (motionsites, only when you say go)
-- [ ] _TBD_
+- [x] Geist type system, dark header stepper, animated drop zone, health bar, results headline, motion with reduced-motion support
 
 ### Phase 4: Ship
 - [ ] Update README, FEATURES, CHANGELOG

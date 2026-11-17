@@ -2,6 +2,15 @@
 
 Newest entries at the top.
 
+## Phase 3: make it pretty (motionsites skill)
+- **Design direction: "calm, precise, trustworthy".** One typeface (Geist) plus Geist Mono for small labels and step numbers (`01 / 04`), a dark header, pill buttons and rounded cards. Why: it's a tool an ops admin uses daily, so it should feel reliable and quiet, not flashy.
+- **Signature: a live import-health bar** (ready vs needs attention) that animates as rows get fixed, plus a big `162/200 rows ready` counter. Why: the admin's one question is "how close am I?", and now it's answered at a glance.
+- **Upload is now a real landing step**: a clear headline, a 3-step "Map / Fix / Trust" explainer, a drop zone with a slow animated gradient border (it speeds up on drag), and sample-file chips. Why: it explains what the app does before they commit a file.
+- **Header stepper with a gradient progress line; steps fade up on change.** Why: orientation and a sense of progress. Respects `prefers-reduced-motion`.
+- **Results page leads with "N items are in."** Why: answers "what got in" first, then the details.
+- **Compacted the three status banners after the screenshot review.** Why: stacked, they pushed the table below the fold.
+- **All functionality and the color meanings are unchanged** (purple AI, green safe fix, amber guess, orange duplicate, red needs you).
+
 ## UX: AI is purple everywhere + its own filter
 - **One color per source of change: purple = AI, green = our safe fixes, amber = our guesses, orange = duplicates, red = needs you.** AI-suggested cells, their cards and the row status ("● Check N AI suggestions") are now purple to match the purple AI banner. Why: in hand-testing, a purple banner with amber rows didn't connect.
 - **Rows the AI could help with show "🤖 AI can suggest a fix"** under their red status. Why: links each row back to the purple banner before AI runs.

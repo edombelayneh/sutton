@@ -1,1 +1,41 @@
 @import "tailwindcss";
+html, body { background: #f6f7f9; }
+
+@theme {
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+body { font-family: var(--font-sans); color: #0f172a; -webkit-font-smoothing: antialiased; }
+
+/* Step transitions */
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.animate-rise { animation: rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.stagger > * { animation: rise 480ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.stagger > *:nth-child(2) { animation-delay: 60ms; }
+.stagger > *:nth-child(3) { animation-delay: 120ms; }
+.stagger > *:nth-child(4) { animation-delay: 180ms; }
+.stagger > *:nth-child(5) { animation-delay: 240ms; }
+.stagger > *:nth-child(6) { animation-delay: 300ms; }
+
+/* Drop zone: slow rotating gradient border */
+@property --angle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+@keyframes spin-angle { to { --angle: 360deg; } }
+.dropzone-ring {
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    conic-gradient(from var(--angle), #c7d2fe, #a78bfa, #34d399, #93c5fd, #c7d2fe) border-box;
+  border: 1.5px solid transparent;
+  animation: spin-angle 8s linear infinite;
+}
+.dropzone-ring.is-drag { animation-duration: 1.6s; }
+
+/* Health bar segments grow smoothly */
+.seg { transition: width 600ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+.label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise, .stagger > *, .dropzone-ring { animation: none !important; }
+  .seg { transition: none; }
+}
