@@ -2,6 +2,10 @@
 
 Newest entries at the top.
 
+## Navigation back + view imported items
+- **Steps in the header and the Sutton logo are clickable to go back.** Leaving Map or Review asks "Leave this import? Your changes to this file will be lost." first. Why: the admin was stuck moving forward only, but shouldn't lose edits by a mis-click.
+- **"Imported items" view** (header button with a count, plus "View N imported items →" on the Upload page): a searchable list of everything already in the system (SKU, item with size/vendors/tags as text, category, cost, stock, import time), newest first, no JSON. Why: the admin needs to trust what's already in, and check a SKU before re-importing.
+
 ## Redesign: readable list + edit panel, no JSON on screen
 - **Feedback: the previous look was disliked, and the table was still a spreadsheet** (15 raw columns, JSON in cells, errors in tiny text).
 - **The table is now a readable list**: Status · SKU · Item (with "92 × 50 × 14 cm · 2 vendors · ★ Acme" underneath) · Category in words ("Raw material", not RAW) · Cost as `$388.51` · Stock as `1,948` · **"What's going on"** as plain-English colored chips ("SKU shared with row 32", "Name: Name is required", "2 AI suggestions"). Why: an ops admin scans for meaning, not codes.

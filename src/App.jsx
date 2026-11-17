@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Papa from 'papaparse'
 import { FIELDS, FIELD_KEYS, autoMapHeaders, applyMapping, validateRows } from '../shared/schema.js'
 import { autoFixRow, generateSku } from '../shared/autofix.js'
+import { createPortal } from 'react-dom'
 import { EditPanel, CAT_LABEL, FIELD_LABEL, money, count, sizeText, vendorsText } from './review-ui.jsx'
 
 // Rows carry their auto-fix log in `_fixes`; strip it before sending/exporting.
@@ -69,35 +70,46 @@ export default function App() {
     setStep(2)
   }
 
+  const [showItems, setShowItems] = useState(false)
+  // Go back to an earlier step. Leaving Map/Review throws away in-progress edits, so ask first.
+  const goTo = (i) => {
+    if (i >= step || step === 3 && i !== 0) return
+    if ((step === 1 || step === 2) && !window.confirm('Leave this import? Your changes to this file will be lost.')) return
+    if (i === 0) reset()
+    else setStep(i)
+  }
+
   const reset = () => { setStep(0); setResult(null); setRows([]); refreshExisting() }
 
   return (
     <div className="min-h-screen text-slate-900">
       <header className="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-slate-200 text-slate-900">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center gap-8">
-          <div className="flex items-center gap-2.5 shrink-0">
+          <button className="flex items-center gap-2.5 shrink-0" onClick={() => goTo(0)} title="Back to upload">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
               <path d="m3 7 9 5 9-5M12 12v10" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" opacity=".55" />
             </svg>
             <span className="font-medium tracking-tight">Sutton<span className="text-slate-500"> / Import</span></span>
-          </div>
+          </button>
           <ol className="hidden md:flex items-center gap-1 text-sm ml-auto">
             {STEPS.map((s, i) => (
               <li key={s} className="flex items-center gap-1">
                 {i > 0 && <span className={`w-6 h-px ${i <= step ? 'bg-slate-400' : 'bg-slate-200'}`} />}
-                <span className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-colors ${i === step ? 'bg-slate-900 text-white' : i < step ? 'text-slate-600' : 'text-slate-400'}`}>
+                <button disabled={!(i < step && (step !== 3 || i === 0))} onClick={() => goTo(i)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-colors ${i === step ? 'bg-slate-900 text-white' : i < step ? 'text-slate-600 enabled:hover:bg-slate-100' : 'text-slate-400'}`}>
                   <span className="font-mono text-[11px]">{i < step ? '✓' : String(i + 1).padStart(2, '0')}</span>{s}
-                </span>
+                </button>
               </li>
             ))}
           </ol>
+          <button onClick={() => setShowItems(true)} className="shrink-0 px-3 py-1.5 rounded-full text-sm border border-slate-200 hover:bg-slate-50 md:ml-2">Imported items <span className="text-slate-400 tabular-nums">{existingSkus.size}</span></button>
           <span className="md:hidden ml-auto label text-slate-500">{String(step + 1).padStart(2, '0')} / {String(STEPS.length).padStart(2, '0')}</span>
         </div>
         <div className="h-0.5 bg-slate-100"><div className="h-full bg-gradient-to-r from-sky-400 via-violet-400 to-emerald-400 seg" style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} /></div>
       </header>
       <main key={step} className="max-w-6xl mx-auto px-6 py-8 animate-rise">
-        {step === 0 && <Upload onText={loadText} existingCount={existingSkus.size} />}
+        {step === 0 && <Upload onText={loadText} existingCount={existingSkus.size} onViewItems={() => setShowItems(true)} />}
         {step === 1 && (
           <MapColumns aiMap={aiMap} fileName={fileName} headers={headers} sample={csvRows[0]} mapping={mapping}
             setMapping={setMapping} onBack={() => setStep(0)} onNext={confirmMapping} />
@@ -108,11 +120,12 @@ export default function App() {
         )}
         {step === 3 && result && <Results result={result} onRestart={reset} />}
       </main>
+      {showItems && <ImportedItems onClose={() => setShowItems(false)} />}
     </div>
   )
 }
 
-function Upload({ onText, existingCount }) {
+function Upload({ onText, existingCount, onViewItems }) {
   const [drag, setDrag] = useState(false)
   const readFile = (f) => f && f.text().then((t) => onText(t, f.name))
   const loadSample = (name) => fetch(`/samples/${name}`).then((r) => r.text()).then((t) => onText(t, name))
@@ -160,7 +173,7 @@ function Upload({ onText, existingCount }) {
           <span className="text-slate-500 mr-1">No file handy?</span>
           <button className="px-3 py-1.5 rounded-full border border-slate-200 bg-white hover:border-slate-400 transition-colors" onClick={() => loadSample('items_clean.csv')}>Clean sample</button>
           <button className="px-3 py-1.5 rounded-full border border-slate-200 bg-white hover:border-slate-400 transition-colors" onClick={() => loadSample('items_messy.csv')}>Messy sample</button>
-          <span className="ml-auto label text-slate-400">{existingCount} items in system</span>
+          <button onClick={onViewItems} className="ml-auto text-sm text-slate-600 hover:text-slate-900 underline underline-offset-4 decoration-slate-300">View {existingCount} imported items →</button>
         </div>
       </div>
     </div>
@@ -537,6 +550,57 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
         />
       )}
     </div>
+  )
+}
+
+function ImportedItems({ onClose }) {
+  const [items, setItems] = useState(null)
+  const [q, setQ] = useState('')
+  useEffect(() => { fetch('/api/items').then((r) => r.json()).then(setItems).catch(() => setItems([])) }, [])
+  const list = (items || []).slice().reverse()
+    .filter((it) => !q || `${it.sku} ${it.name}`.toLowerCase().includes(q.toLowerCase()))
+  const dims = (d) => (d ? `${d.length} × ${d.width} × ${d.height} ${d.unit || 'cm'}` : '')
+  const vend = (v) => (v?.length ? `${v.length} vendor${v.length > 1 ? 's' : ''}${v.find((x) => x.is_preferred) ? ` · ★ ${v.find((x) => x.is_preferred).vendor_name}` : ''}` : '')
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-label="Imported items">
+      <div className="absolute inset-0 bg-slate-900/20" onClick={onClose} />
+      <aside className="relative w-full max-w-4xl h-full bg-white shadow-2xl flex flex-col animate-slide">
+        <header className="px-6 py-4 border-b border-slate-100 flex items-center gap-4">
+          <div>
+            <div className="font-semibold">Imported items</div>
+            <div className="text-xs text-slate-500">{items ? `${items.length} items already in the system` : 'Loading…'}</div>
+          </div>
+          <input autoFocus placeholder="Search SKU or name…" value={q} onChange={(e) => setQ(e.target.value)}
+            className="ml-auto w-64 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+          <button className="w-8 h-8 rounded-lg hover:bg-slate-100" title="Close" onClick={onClose}>✕</button>
+        </header>
+        <div className="flex-1 overflow-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-white text-left text-xs text-slate-400 border-b border-slate-100">
+              <tr><th className="py-3 pl-6 pr-3 font-medium">SKU</th><th className="px-3 font-medium">Item</th><th className="px-3 font-medium">Category</th>
+                <th className="px-3 font-medium text-right">Cost</th><th className="px-3 font-medium text-right">In stock</th><th className="px-3 pr-6 font-medium">Imported</th></tr>
+            </thead>
+            <tbody>
+              {list.map((it) => (
+                <tr key={it.sku} className="border-b border-slate-50">
+                  <td className="py-3 pl-6 pr-3 font-mono text-xs whitespace-nowrap">{it.sku}</td>
+                  <td className="px-3 max-w-[280px]">
+                    <div className="font-medium truncate">{it.name}{it.is_active === false && <span className="ml-2 text-xs text-slate-400">inactive</span>}</div>
+                    <div className="text-xs text-slate-400 truncate">{[dims(it.dimensions), vend(it.vendors), (it.tags || []).join(', ')].filter(Boolean).join(' · ')}</div>
+                  </td>
+                  <td className="px-3 whitespace-nowrap">{CAT_LABEL[it.category] || it.category}</td>
+                  <td className="px-3 text-right tabular-nums">{money(String(it.unit_cost))}</td>
+                  <td className="px-3 text-right tabular-nums">{count(String(it.quantity_on_hand ?? 0))}</td>
+                  <td className="px-3 pr-6 text-xs text-slate-500 whitespace-nowrap">{it.imported_at ? new Date(it.imported_at).toLocaleString() : '–'}</td>
+                </tr>
+              ))}
+              {items && list.length === 0 && <tr><td colSpan={6} className="p-10 text-center text-slate-500">{q ? 'No items match your search.' : 'Nothing imported yet.'}</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </aside>
+    </div>,
+    document.body,
   )
 }
 

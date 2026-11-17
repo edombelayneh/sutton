@@ -21,6 +21,8 @@ Each feature, why it helps the user, and its status.
 | 13 | Readable list: words not codes, $ and thousands formatting, plain-English "What's going on" chips | The admin understands every row at a glance, without knowing the schema | Done |
 | 14 | Slide-in edit panel with grouped fields, Next issue / ↑↓ navigation | Fix rows one at a time with full context, fast | Done |
 | 15 | No JSON on screen: size as L×W×H + unit, vendors as an editable list with ★ preferred; recovers truncated vendor data | Non-technical users can edit complex fields safely | Done |
+| 16 | Clickable steps / logo to go back (with a "lose changes?" confirm) | Move around freely without losing work by accident | Done |
+| 17 | Searchable "Imported items" view | See and check everything already in the system | Done |
 | 11 | Live import-health bar + "N/200 ready" counter | Instantly shows how close they are to done | Done |
 | 12 | Guided upload page (Map / Fix / Trust explainer, sample files) | They know what will happen before uploading | Done |
 | 10b | Color-coded sources (purple AI, green fixed, amber guess, orange duplicate, red needs you) + "🤖 AI" filter + Accept all | The admin can tell at a glance who changed what, and review AI work in bulk | Done |
