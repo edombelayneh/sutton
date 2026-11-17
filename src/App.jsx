@@ -17,6 +17,7 @@ export default function App() {
   const [rows, setRows] = useState([]) // raw strings per field, editable
   const [existingSkus, setExistingSkus] = useState(new Set())
   const [result, setResult] = useState(null)
+  const [aiMap, setAiMap] = useState({ busy: false, notes: {}, msg: '' })
 
   const refreshExisting = () =>
     fetch('/api/items').then((r) => r.json()).then((items) => setExistingSkus(new Set(items.map((i) => i.sku))))
@@ -28,9 +29,35 @@ export default function App() {
     setFileName(name)
     setHeaders(hs)
     setCsvRows(parsed.data)
-    setMapping(autoMapHeaders(hs))
+    const auto = autoMapHeaders(hs)
+    setMapping(auto)
     setResult(null)
     setStep(1)
+    // Fallback: ask AI about columns our alias matching couldn't place (judging by header + sample values).
+    const unmapped = hs.filter((h) => !auto[h])
+    setAiMap({ busy: unmapped.length > 0, notes: {}, msg: '' })
+    if (!unmapped.length) return
+    fetch('/api/ai/map', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unmapped: unmapped.map((h) => ({ header: h, samples: parsed.data.map((r) => r[h]).filter(Boolean).slice(0, 3) })),
+        used: Object.values(auto).filter(Boolean),
+      }),
+    })
+      .then(async (r) => {
+        const data = await r.json()
+        if (!r.ok) throw new Error(data.error)
+        const notes = {}
+        for (const m of data.mappings) notes[m.header] = m
+        setMapping((cur) => {
+          const next = { ...cur }
+          const used = new Set(Object.values(next).filter(Boolean))
+          for (const m of data.mappings) if (m.field && !next[m.header] && !used.has(m.field)) { next[m.header] = m.field; used.add(m.field) }
+          return next
+        })
+        setAiMap({ busy: false, notes, msg: '' })
+      })
+      .catch((e) => setAiMap({ busy: false, notes: {}, msg: /AI is off/.test(e.message) ? 'off' : e.message }))
   }
 
   const confirmMapping = () => {
@@ -60,7 +87,7 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-6 py-8">
         {step === 0 && <Upload onText={loadText} existingCount={existingSkus.size} />}
         {step === 1 && (
-          <MapColumns fileName={fileName} headers={headers} sample={csvRows[0]} mapping={mapping}
+          <MapColumns aiMap={aiMap} fileName={fileName} headers={headers} sample={csvRows[0]} mapping={mapping}
             setMapping={setMapping} onBack={() => setStep(0)} onNext={confirmMapping} />
         )}
         {step === 2 && (
@@ -99,13 +126,15 @@ function Upload({ onText, existingCount }) {
   )
 }
 
-function MapColumns({ fileName, headers, sample, mapping, setMapping, onBack, onNext }) {
+function MapColumns({ aiMap, fileName, headers, sample, mapping, setMapping, onBack, onNext }) {
   const used = Object.values(mapping).filter(Boolean)
   const missingRequired = FIELDS.filter((f) => f.required && !used.includes(f.key))
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Map the columns in <span className="font-mono">{fileName}</span></h2>
       <p className="text-slate-600 text-sm">We matched your columns automatically. Change any that look wrong.</p>
+      {aiMap.busy && <div className="bg-violet-50 border border-violet-200 rounded-lg px-4 py-2 text-sm text-violet-900">🤖 AI is looking at the columns we couldn't match…</div>}
+      {aiMap.msg && aiMap.msg !== 'off' && <div className="bg-slate-100 rounded-lg px-4 py-2 text-sm text-slate-600">AI column matching unavailable ({aiMap.msg}). You can pick fields by hand.</div>}
       <table className="w-full bg-white rounded-lg shadow-sm text-sm">
         <thead className="text-left text-slate-500"><tr><th className="p-3">Your column</th><th className="p-3">Example value</th><th className="p-3">Imports as</th></tr></thead>
         <tbody>
@@ -123,6 +152,14 @@ function MapColumns({ fileName, headers, sample, mapping, setMapping, onBack, on
                     </option>
                   ))}
                 </select>
+                {aiMap.notes[h] && (
+                  <div className="text-xs text-violet-700 mt-1">
+                    🤖 {aiMap.notes[h].field
+                      ? (mapping[h] === aiMap.notes[h].field ? `AI matched this: ${aiMap.notes[h].why}` : `AI suggested ${aiMap.notes[h].field}`)
+                      : `AI: not an item field${aiMap.notes[h].why ? `, ${aiMap.notes[h].why}` : ''}`}
+                  </div>
+                )}
+                {!mapping[h] && !aiMap.notes[h] && !aiMap.busy && <div className="text-xs text-slate-500 mt-1">Not imported</div>}
               </td>
             </tr>
           ))}
@@ -145,6 +182,9 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
   // Rows the user has edited stay visible in "Needs attention" until they re-click the filter,
   // so a row doesn't vanish mid-typing the moment it becomes valid.
   const [touched, setTouched] = useState(new Set())
+  const [aiOn, setAiOn] = useState(false)
+  const [ai, setAi] = useState({ busy: false, msg: '' })
+  useEffect(() => { fetch('/api/health').then((r) => r.json()).then((h) => setAiOn(h.ai)).catch(() => {}) }, [])
   const results = useMemo(() => validateRows(rows, existingSkus), [rows, existingSkus])
 
   // A fix is "active" while the cell still holds the fixed value; "pending" until the user keeps it.
@@ -211,6 +251,41 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
   const visible = filter === 'dups'
     ? [...visibleRaw].sort((a, b) => (dupOf[a]?.idx[0] ?? a) - (dupOf[b]?.idx[0] ?? b) || a - b)
     : visibleRaw
+
+  // ---- AI: rows with problems other than duplicate SKUs (those have their own flow) ----
+  const aiTargets = rows.map((r, i) => {
+    const errors = { ...results[i].errors }
+    if (dupOf[i] && /Duplicate|already exists/.test(errors.sku || '')) delete errors.sku
+    return { index: i, row: clean(r), errors }
+  }).filter((t) => Object.keys(t.errors).length)
+
+  const askAi = async () => {
+    setAi({ busy: true, msg: '' })
+    try {
+      const res = await fetch('/api/ai/suggest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: aiTargets }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'AI request failed')
+      let applied = 0
+      setRows((cur) => {
+        const next = [...cur]
+        for (const sug of data.suggestions) {
+          const i = sug.index, k = sug.field
+          if (!next[i] || !FIELD_KEYS.includes(k) || typeof sug.value !== 'string' || next[i][k] === sug.value) continue
+          const from = next[i][k]
+          next[i] = { ...next[i], [k]: sug.value, _fixes: { ...next[i]._fixes, [k]: { from, to: sug.value, why: sug.why || 'AI suggestion', warn: true, ai: true } } }
+          applied++
+        }
+        return next
+      })
+      setTouched(new Set([...touched, ...aiTargets.map((t) => t.index)]))
+      setAi({ busy: false, msg: `AI suggested ${data.suggestions.length} fixes. They're marked 🤖 for you to Keep or Undo.${data.failedBatches ? ` (${data.failedBatches} batch(es) failed; try again.)` : ''}` })
+      void applied
+    } catch (e) {
+      setAi({ busy: false, msg: `AI couldn't help this time: ${e.message}` })
+    }
+  }
 
   // Give rows new SKUs (recorded as an amber "please check" fix so the user confirms them).
   const reassign = (base, idxs) => {
@@ -286,6 +361,22 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
           </div>
         </div>
       )}
+      {aiTargets.length > 0 && (
+        <div className="bg-violet-50 border-2 border-violet-300 rounded-lg px-4 py-3 flex items-center gap-4 flex-wrap">
+          <div>
+            <div className="font-semibold text-violet-900">🤖 {aiTargets.length} row{aiTargets.length > 1 ? 's still have' : ' still has'} problems we can't fix safely on our own</div>
+            <div className="text-sm text-violet-900">
+              {ai.msg || (aiOn
+                ? 'AI can suggest values from the rest of the row (e.g. a category from the name, a cost from the preferred vendor). You approve each one.'
+                : 'AI is off. Add OPENROUTER_API_KEY to .env and restart to get suggestions. You can still fix these by hand.')}
+            </div>
+          </div>
+          <button disabled={!aiOn || ai.busy} onClick={askAi}
+            className="ml-auto px-3 py-2 rounded bg-violet-600 text-white text-sm font-medium disabled:opacity-50">
+            {ai.busy ? `AI is reviewing ${aiTargets.length} rows…` : `🤖 Suggest fixes for ${aiTargets.length} rows`}
+          </button>
+        </div>
+      )}
       {pendingTotal > 0 && (
         <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg px-4 py-3 flex items-center gap-4 flex-wrap">
           <div>
@@ -346,7 +437,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
                           className={`w-36 px-2 py-1 rounded border font-mono ${tone}`} />
                         {fixed && (
                           <div className={`w-36 mt-1 p-1.5 rounded leading-tight ${fix.warn ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
-                            <div className="font-semibold">{fix.warn ? '⚠ Please check' : '✨ Fixed'}</div>
+                            <div className="font-semibold">{fix.ai ? '🤖 AI suggestion' : fix.warn ? '⚠ Please check' : '✨ Fixed'}</div>
                             <div>was <span className="font-mono line-through">{fix.from.trim() === '' ? '(spaces)' : fix.from}</span></div>
                             <div className="opacity-75">{fix.why}</div>
                             <div className="flex gap-1 mt-1">

@@ -2,6 +2,20 @@
 
 Newest entries at the top.
 
+## Phase 2d: AI header-mapping fallback
+- **`POST /api/ai/map`: only headers our alias matching couldn't place are sent to the AI, with up to 3 sample values each, plus the list of still-unused fields.** Why: headers like `Part #`, `Grp` or `Std Cost` are obvious to a human but not to a fixed alias list; sample values let the AI tell e.g. a date column from a cost column.
+- **Runs automatically when the Map step opens; AI picks show "🤖 AI matched this: <why>" under the dropdown**, and columns the AI rejects show "AI: not an item field". Why: zero extra clicks, but the admin can see and override every choice.
+- **The server enforces that each field is used once and only real field keys are accepted.** Why: never trust model output blindly.
+- **Fails quietly**: no key or an AI error leaves the normal manual dropdowns. Why: AI is a helper, never a blocker.
+- **Added `samples/items_odd_headers.csv`** (clean data, unusual headers) to demo and test this.
+
+## Phase 2c: AI suggestions for what's left
+- **`POST /api/ai/suggest`: sends only the still-broken rows (with their errors) to OpenRouter via `server/ai.js`, in parallel batches of 15.** Why: the remaining problems (`TBD` costs, `Misc` category, broken vendor JSON, missing height, discontinued-but-active) need judgment from the rest of the row, which is tedious for a human and good work for an LLM.
+- **The prompt contains the full field rules and tells the model to use evidence from the row** (category from the name, cost from the preferred vendor, repair truncated JSON) **and to omit what it can't infer.** Why: we'd rather leave a blank than invent inventory data.
+- **AI suggestions go through the same Keep/Undo flow, labeled "🤖 AI suggestion", always amber (must be confirmed).** Why: the AI never writes to the import without the admin approving it; everything is re-validated before import.
+- **Duplicate-SKU errors are excluded from the AI** (they have their own resolver). Why: picking which product keeps a SKU is a business decision.
+- **The key stays server-side, and the app works without it**: the banner says AI is off and how to enable it. Why: graders can run it without a key; the key is never shipped to the browser.
+
 ## UX: duplicates scale to any file size
 - **Replaced the per-SKU card panel with a one-line banner + a "Duplicates (N)" filter tab.** Why: one card per SKU grows without limit. With 500 duplicates the cards would push the table off screen. The banner is always the same size, and the table already scrolls in a fixed-height box.
 - **Duplicates view sorts items that share a SKU next to each other**, each labeled "Shared with row 32" or "Identical to row 32". Why: the comparison stays visible without separate cards.

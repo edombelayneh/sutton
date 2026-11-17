@@ -55,8 +55,8 @@ An ops admin. Not a developer. Used to Excel. Wants confidence, not JSON.
 ### Phase 2: Make it effortless
 - [x] Auto-fix safe issues + a "what we changed" before → after view
 - [x] Duplicate SKU resolver (Keep / New SKU / Skip / Resolve all)
-- [ ] AI header mapping fallback
-- [ ] AI suggestions for remaining errors (one-click accept)
+- [x] AI header mapping fallback
+- [x] AI suggestions for remaining errors (one-click accept)
 - [x] Download rejected rows as CSV (done in Phase 1)
 
 ### Phase 3: Make it pretty (motionsites, only when you say go)

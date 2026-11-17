@@ -11,7 +11,16 @@ npm install
 npm run dev
 ```
 
-The app opens automatically at **http://localhost:5173**.
+The app opens automatically at **http://localhost:5173** (the API runs on port 3001).
+
+### Optional: turn on AI suggestions
+
+```bash
+cp .env.example .env
+# then put your key in .env:  OPENROUTER_API_KEY=sk-or-...
+```
+
+Restart `npm run dev` after adding the key. Without a key, everything works except the "🤖 Suggest fixes" button.
 
 ## What it does
 
