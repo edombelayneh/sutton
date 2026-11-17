@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Papa from 'papaparse'
 import { FIELDS, FIELD_KEYS, autoMapHeaders, applyMapping, validateRows } from '../shared/schema.js'
-import { autoFixRow } from '../shared/autofix.js'
+import { autoFixRow, generateSku } from '../shared/autofix.js'
 
 // Rows carry their auto-fix log in `_fixes`; strip it before sending/exporting.
 const clean = ({ _fixes, ...r }) => r
@@ -161,8 +161,6 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
   const pendingRows = rows.filter((r) => pendingFixes(r).length).length
   const checkTotal = status.reduce((n, s) => n + s.checks, 0)
 
-  const visible = rows.map((r, i) => i).filter((i) =>
-    filter === 'all' ? true : filter === 'fixed' ? pendingFixes(rows[i]).length > 0 : !status[i].ready || touched.has(i))
 
   const touch = (i) => { if (!touched.has(i)) setTouched(new Set(touched).add(i)) }
   const edit = (i, key, value) => { setRows(rows.map((r, j) => (j === i ? { ...r, [key]: value } : r))); touch(i) }
@@ -176,9 +174,71 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
     for (const [k] of activeFixes(r)) f[k] = { ...f[k], confirmed: true }
     return { ...r, _fixes: f }
   }))
-  const remove = (i) => {
-    setRows(rows.filter((_, j) => j !== i))
-    setTouched(new Set([...touched].filter((t) => t !== i).map((t) => (t > i ? t - 1 : t))))
+  // Remove several rows at once, keeping the "touched" indices aligned.
+  const removeMany = (idxs, base = rows) => {
+    const drop = new Set(idxs)
+    setRows(base.filter((_, j) => !drop.has(j)))
+    const shift = (t) => t - idxs.filter((d) => d < t).length
+    setTouched(new Set([...touched].filter((t) => !drop.has(t)).map(shift)))
+  }
+  const remove = (i) => removeMany([i])
+
+  // ---- Duplicate SKUs (within the file, or already in the system) ----
+  const dupGroups = useMemo(() => {
+    const by = {}
+    rows.forEach((r, i) => { const k = r.sku.trim(); if (k) (by[k] = by[k] || []).push(i) })
+    return Object.entries(by)
+      .filter(([sku, idx]) => idx.length > 1 || existingSkus.has(sku))
+      .map(([sku, idx]) => {
+        const sig = (i) => JSON.stringify(clean(rows[i]))
+        return { sku, idx, existing: existingSkus.has(sku), identical: idx.length > 1 && idx.every((i) => sig(i) === sig(idx[0])) }
+      })
+  }, [rows, existingSkus])
+
+  const dupOf = useMemo(() => {
+    const m = {}
+    dupGroups.forEach((g) => g.idx.forEach((i) => { m[i] = g }))
+    return m
+  }, [dupGroups])
+  const dupItems = Object.keys(dupOf).length
+
+  const visibleRaw = rows.map((r, i) => i).filter((i) =>
+    filter === 'all' ? true
+      : filter === 'fixed' ? pendingFixes(rows[i]).length > 0
+      : filter === 'dups' ? dupOf[i] || touched.has(i)
+      : !status[i].ready || touched.has(i))
+  // In the Duplicates view, keep items that share a SKU next to each other.
+  const visible = filter === 'dups'
+    ? [...visibleRaw].sort((a, b) => (dupOf[a]?.idx[0] ?? a) - (dupOf[b]?.idx[0] ?? b) || a - b)
+    : visibleRaw
+
+  // Give rows new SKUs (recorded as an amber "please check" fix so the user confirms them).
+  const reassign = (base, idxs) => {
+    const taken = new Set([...existingSkus, ...base.map((r) => r.sku.trim())])
+    const next = [...base]
+    for (const i of idxs) {
+      const old = next[i].sku
+      const sku = generateSku(next[i].name, taken)
+      taken.add(sku)
+      next[i] = { ...next[i], sku, _fixes: { ...next[i]._fixes, sku: { from: old, to: sku, why: `New SKU: "${old.trim()}" was already used`, warn: true } } }
+    }
+    return next
+  }
+  const newSku = (i) => { setRows(reassign(rows, [i])); touch(i) }
+  const keepSku = (g, keepIdx) => {
+    setRows(reassign(rows, g.existing ? g.idx : g.idx.filter((i) => i !== keepIdx)))
+    setTouched(new Set([...touched, ...g.idx]))
+  }
+  const resolveAll = () => {
+    let next = rows
+    const drop = []
+    for (const g of dupGroups) {
+      if (g.identical && !g.existing) { drop.push(...g.idx.slice(1)); continue }
+      const validFormat = /^[A-Z]{4}-[A-Z0-9]{3}$/.test(g.sku)
+      next = reassign(next, g.existing || !validFormat ? g.idx : g.idx.slice(1))
+    }
+    if (drop.length) removeMany(drop, next)
+    else setRows(next)
   }
   const showErrors = () => { setFilter('errors'); setTouched(new Set()) }
 
@@ -208,10 +268,24 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
           <span className="font-semibold text-red-600">{attentionCount} need attention</span>{' · '}{rows.length} rows</div>
         <div className="ml-auto flex gap-2 text-sm">
           {tab('errors', `Needs attention (${attentionCount})`, showErrors)}
+          {dupItems > 0 && tab('dups', `Duplicates (${dupItems})`)}
           {tab('fixed', `Auto-fixed (${pendingRows})`)}
           {tab('all', 'All rows')}
         </div>
       </div>
+      {dupGroups.length > 0 && (
+        <div className="bg-orange-50 border-2 border-orange-400 rounded-lg px-4 py-3 flex items-center gap-4 flex-wrap">
+          <div>
+            <div className="font-semibold text-orange-900">⚠ {dupGroups.length} SKU{dupGroups.length > 1 ? 's are' : ' is'} shared by {dupItems} items</div>
+            <div className="text-sm text-orange-900">A SKU must be unique{dupGroups.some((g) => g.existing) ? ' (some already exist in the system)' : ''}. These rows can't import until each one is resolved.</div>
+          </div>
+          <div className="ml-auto flex gap-2">
+            <button className="px-3 py-2 rounded border border-orange-400 bg-white text-orange-900 text-sm" onClick={() => setFilter('dups')}>Review duplicates</button>
+            <button className="px-3 py-2 rounded bg-orange-600 text-white text-sm font-medium" onClick={resolveAll}
+              title="Identical copies are removed. Otherwise the first item keeps the SKU and the others get new SKUs for you to confirm.">✨ Resolve all</button>
+          </div>
+        </div>
+      )}
       {pendingTotal > 0 && (
         <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg px-4 py-3 flex items-center gap-4 flex-wrap">
           <div>
@@ -240,6 +314,25 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
                     {st.errs > 0 ? <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">● Needs you: {st.errs} field{st.errs > 1 ? 's' : ''}</span>
                       : st.checks > 0 ? <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">● Check {st.checks} fix{st.checks > 1 ? 'es' : ''}</span>
                       : <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">● Ready</span>}
+                    {dupOf[i] && (() => {
+                      const g = dupOf[i]
+                      const others = g.idx.filter((j) => j !== i).map((j) => j + 1)
+                      return (
+                        <div className="mt-1.5 p-1.5 rounded bg-orange-100 text-orange-900 w-44 whitespace-normal leading-tight">
+                          <div className="font-semibold">⚠ Duplicate SKU</div>
+                          <div>{g.identical ? `Identical to row ${others.join(', ')}` : others.length ? `Shared with row ${others.join(', ')}` : 'Already in the system'}</div>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {g.identical && i !== g.idx[0]
+                              ? <button className="px-1.5 rounded bg-white border font-medium" onClick={() => remove(i)}>Remove copy</button>
+                              : <>
+                                  {!g.existing && <button className="px-1.5 rounded bg-white border" title="This item keeps the SKU; the others get new ones" onClick={() => keepSku(g, i)}>Keep SKU</button>}
+                                  <button className="px-1.5 rounded bg-white border" title="Generate a new unique SKU for this item" onClick={() => newSku(i)}>✨ New SKU</button>
+                                  <button className="px-1.5 rounded bg-white border text-slate-500" title="Leave this row out of the import" onClick={() => remove(i)}>Skip</button>
+                                </>}
+                          </div>
+                        </div>
+                      )
+                    })()}
                   </td>
                   {FIELD_KEYS.map((k) => {
                     const err = results[i].errors[k]

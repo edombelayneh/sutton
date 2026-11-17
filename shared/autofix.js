@@ -125,3 +125,17 @@ export function autoFixRow(raw) {
   }
   return { row, fixes }
 }
+
+const SKU_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+/** Generate a valid, unique SKU from an item name, e.g. "Fiberglass Hex Bolt" -> "FIBE-7K2". */
+export function generateSku(name, taken) {
+  let prefix = String(name || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4)
+  while (prefix.length < 4) prefix += 'X'
+  for (let n = 0; n < 1000; n++) {
+    let suffix = ''
+    for (let j = 0; j < 3; j++) suffix += SKU_CHARS[Math.floor(Math.random() * SKU_CHARS.length)]
+    const sku = `${prefix}-${suffix}`
+    if (!taken.has(sku)) return sku
+  }
+  throw new Error('Could not generate a unique SKU')
+}

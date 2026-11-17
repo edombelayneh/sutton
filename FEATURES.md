@@ -16,6 +16,7 @@ Each feature, why it helps the user, and its status.
 | 9b | Before → after on every fixed cell, with undo and an "Auto-fixed" filter | They can see and reverse every change we made, so they trust the result | Done |
 | 9d | Row status column (Ready / Check fixes / Needs you) + Keep/Undo + "Confirm all" | Every row says exactly what to do next; one click accepts all our fixes | Done |
 | 9c | Ambiguous dates flagged amber "please double-check" | We never hide an assumption that could be wrong | Done |
+| 9e | Duplicate SKU banner + "Duplicates" filter: Keep / ✨ New SKU / Skip inline, remove identical copies, Resolve all | They know duplicates exist and fix them without losing a real product, and it scales to any file size | Done |
 | 10 | AI suggestions for remaining errors | Does the judgment-call work for them, with one-click accept | Planned |
 
 **Status key:** Planned · In progress · Done · Cut (with reason)

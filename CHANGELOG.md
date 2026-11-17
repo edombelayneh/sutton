@@ -2,6 +2,20 @@
 
 Newest entries at the top.
 
+## UX: duplicates scale to any file size
+- **Replaced the per-SKU card panel with a one-line banner + a "Duplicates (N)" filter tab.** Why: one card per SKU grows without limit. With 500 duplicates the cards would push the table off screen. The banner is always the same size, and the table already scrolls in a fixed-height box.
+- **Duplicates view sorts items that share a SKU next to each other**, each labeled "Shared with row 32" or "Identical to row 32". Why: the comparison stays visible without separate cards.
+- **Keep SKU / ✨ New SKU / Skip (or Remove copy) moved inline into each row's Status cell.** Why: one place to work, the same banner → filter → act pattern as auto-fixes.
+- **"✨ Resolve all" in the banner stays the main path for big files.** Why: bulk action for the "infinite duplicates" case; new SKUs are still amber for confirmation.
+
+## Phase 2b: duplicate SKU resolver
+- **Checked the data first: all 6 duplicate pairs in the messy file are *different products* sharing a SKU** (e.g. FXBU-KHM is both "Rubber Hinge" and "Fiberglass Hex Bolt M8"). Why it matters: a plain "keep one / merge" would have silently dropped a real product, so the design changed.
+- **Prominent orange "⚠ Duplicate SKUs" panel above the table**, showing each group side by side (name, category, cost, qty). Why: the user must *know* there are duplicates, not discover them cell by cell.
+- **Per item: Keep SKU / ✨ New SKU / Skip.** New SKUs are generated from the item name (e.g. `FIBE-7K2`), guaranteed valid and unique against the file and existing records, and marked amber "please check" so the admin confirms them. Why: the fix takes one click, but it's still their decision.
+- **Truly identical rows get "Remove extra copy"** (the merge case). Why: an accidental double paste shouldn't need a new SKU.
+- **SKUs that already exist in the system are shown in the same panel** (e.g. re-importing a file). Why: the same mental model covers both kinds of conflict.
+- **"✨ Resolve all"**: removes identical copies; otherwise the first item keeps the SKU and the others get new ones (to confirm). Invalid SKUs like `AB-12` get new SKUs for every item. Why: one click for the common case.
+
 ## UX: make fixes obvious and actionable
 - **Fixed cells are now solid green with a "✨ Fixed" card (was faint blue).** Why: in hand-testing the blue was easy to miss.
 - **A fixed cell is never red.** If a fixed value still has a problem (e.g. an uppercased SKU that's a duplicate), it stays green with "Still needs you: …" underneath. Why: red + blue together left the user unsure whether to act.
