@@ -2,6 +2,14 @@
 
 Newest entries at the top.
 
+## Landing: 3D "self-cleaning" Excel sheet
+- **A small 3D spreadsheet (`inventory.xlsx`) floats over the drop zone, tilting and swaying in 3D.** Its red messy cells (`fxbu-khm`, `$23.98`, `0,26`, `Jan 7, 24`) **flip one by one into green ✓ clean values** with a live "N/12 fixed" counter, then loop. **Hovering it spins it 360°.** Why: an eye-catching, on-message visual: you drop a messy sheet in and it cleans itself. Shown on wide screens only (xl+) so it never crowds the drop zone; static under `prefers-reduced-motion`.
+
+## Landing page: interactive (motionsites skill)
+- **Signature: a "Live preview" ticker** that cycles real before → after fixes from the messy sample (`fxbu-khm → FXBU-KHM`, `$23.98 → 23.98`, `Jan 7, 2024 → 2024-01-07`, `TBD → $84.44 from preferred vendor`, duplicate → new SKU), colored by source (green auto-fix, purple AI, orange duplicate), with clickable progress segments. Why: it shows what the app will do for them before they upload anything.
+- **Drifting aurora background, a gradient headline, and a drop zone with a spotlight that follows the cursor** (the animated gradient border is kept). Why: it feels alive and modern without getting in the way.
+- All motion respects `prefers-reduced-motion` (the ticker stops; the aurora is static).
+
 ## Hardening: security and data-safety review
 A review of crash, security and data-loss risks. Fixed the top 5:
 - **🔴 Data loss: the store is now written atomically** (temp file + rename), and a store file that exists but can't be parsed **raises an error instead of being treated as empty**. Why: before, one half-written file meant the next import silently wiped every item.

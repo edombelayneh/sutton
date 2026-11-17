@@ -144,6 +144,48 @@ export default function App() {
   )
 }
 
+// Decorative 3D spreadsheet: messy (red) cells flip to clean (green) one by one, then reset.
+const SHEET = [
+  ['fxbu-khm', 'FXBU-KHM'], ['$23.98', '23.98'], ['yes', 'true'], ['Jan 7, 24', '2024-01-07'],
+  ['ea', 'EA'], ['1,200', '1200'], ['0,26', '0.26'], [' Oak Cart ', 'Oak Cart'],
+  ['TRUE', 'true'], ['Raw Mat.', 'RAW'], ['METAL', 'metal'], ['$14.31', '14.31'],
+]
+function SpinningSheet() {
+  const [done, setDone] = useState(0)
+  useEffect(() => {
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { setDone(SHEET.length); return }
+    const t = setInterval(() => setDone((n) => (n >= SHEET.length + 3 ? 0 : n + 1)), 650)
+    return () => clearInterval(t)
+  }, [])
+  return (
+    <div className="sheet-stage w-[260px] select-none" aria-hidden>
+      <div className="sheet rounded-xl bg-white shadow-[0_30px_60px_-20px_rgba(15,23,42,.35)] border border-slate-200 overflow-hidden">
+        <div className="bg-emerald-600 text-white px-3 py-1.5 flex items-center gap-2 text-[11px] font-medium">
+          <span className="w-3.5 h-3.5 rounded-sm bg-white text-emerald-700 grid place-items-center text-[9px] font-bold">X</span>
+          inventory.xlsx
+          <span className="ml-auto opacity-80 tabular-nums">{Math.min(done, SHEET.length)}/{SHEET.length} fixed</span>
+        </div>
+        <div className="grid grid-cols-[18px_repeat(3,1fr)] text-[10px] font-mono">
+          <span className="bg-slate-50 border-b border-r border-slate-200" />
+          {['A', 'B', 'C'].map((c) => <span key={c} className="bg-slate-50 border-b border-r border-slate-200 text-center text-slate-400 py-0.5">{c}</span>)}
+          {[0, 1, 2, 3].map((r) => [
+            <span key={'r' + r} className="bg-slate-50 border-b border-r border-slate-200 text-center text-slate-400 py-1.5">{r + 1}</span>,
+            ...[0, 1, 2].map((c) => {
+              const n = r * 3 + c
+              const ok = n < done
+              return (
+                <span key={`${n}-${ok}`} className={`cell-flip border-b border-r border-slate-200 px-1.5 py-1.5 truncate ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
+                  {ok ? '✓ ' + SHEET[n][1] : SHEET[n][0]}
+                </span>
+              )
+            }),
+          ])}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Upload({ onText, onFiles, existingCount, onViewItems }) {
   const [drag, setDrag] = useState(false)
   const readFiles = async (list) => {
@@ -152,37 +194,75 @@ function Upload({ onText, onFiles, existingCount, onViewItems }) {
     onFiles(await Promise.all(files.map(async (f) => ({ name: f.name, text: await fileToText(f) }))))
   }
   const loadSample = (name) => fetch(`/samples/${name}`).then((r) => r.text()).then((t) => onText(t, name))
-  const steps = [
-    ['Map', 'We match your column names to ours, with AI for the odd ones.'],
-    ['Fix', 'Safe fixes happen automatically. You approve anything we guessed.'],
-    ['Trust', 'Only clean rows import. You get a list of everything that didn\'t.'],
+  const DEMO = [
+    ['SKU', 'fxbu-khm', 'FXBU-KHM', 'emerald'],
+    ['Unit cost', '$23.98', '23.98', 'emerald'],
+    ['Received', 'Jan 7, 2024', '2024-01-07', 'emerald'],
+    ['Category', 'Raw Material', 'Raw material', 'emerald'],
+    ['Active', 'yes', 'Yes', 'emerald'],
+    ['Tags', 'Metal;metal; METAL', 'metal', 'emerald'],
+    ['Cost', 'TBD', '$84.44 · from preferred vendor', 'violet'],
+    ['SKU', 'KLFP-AX4 ×2', 'Oak Tool Cart → OAKT-92H', 'orange'],
   ]
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    const t = setInterval(() => setTick((n) => n + 1), 2200)
+    return () => clearInterval(t)
+  }, [])
+  const [label, from, to, tone] = DEMO[tick % DEMO.length]
+  const toneCls = { emerald: 'text-emerald-600', violet: 'text-violet-600', orange: 'text-orange-600' }[tone]
+  const toneTag = { emerald: 'Auto-fixed', violet: 'AI suggestion', orange: 'Duplicate resolved' }[tone]
   return (
+    <div className="relative">
+      <div aria-hidden className="absolute -inset-x-40 -top-24 h-[620px] -z-10 overflow-hidden">
+        <div className="aurora w-[520px] h-[520px] bg-violet-300 left-[8%] top-0" />
+        <div className="aurora w-[460px] h-[460px] bg-emerald-200 right-[6%] top-24" style={{ animationDelay: '-5s' }} />
+        <div className="aurora w-[380px] h-[380px] bg-sky-200 left-[40%] top-56" style={{ animationDelay: '-9s' }} />
+      </div>
     <div className="grid lg:grid-cols-[1fr_1.1fr] gap-12 items-center min-h-[calc(100vh-10rem)] stagger">
       <div className="space-y-6">
-        <span className="label text-slate-500">Bulk import · Inventory items</span>
-        <h1 className="text-5xl md:text-6xl font-medium tracking-[-0.035em] leading-[0.98]">
-          Bring the spreadsheet.<br /><span className="text-slate-400">We'll handle the mess.</span>
+        <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/70 backdrop-blur border border-slate-200 text-xs text-slate-600">
+          <i className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Bulk import · CSV &amp; Excel
+        </span>
+        <h1 className="text-5xl md:text-6xl font-semibold tracking-[-0.04em] leading-[0.98]">
+          Bring the spreadsheet.<br />
+          <span className="bg-gradient-to-r from-violet-600 via-sky-500 to-emerald-500 bg-clip-text text-transparent">We'll handle the mess.</span>
         </h1>
         <p className="text-lg text-slate-600 max-w-md leading-relaxed">
-          Drop in your inventory file as it is. Renamed columns, odd formats and duplicate SKUs are all fine. You'll know exactly what got in.
+          Drop in your inventory files as they are. We map the columns, fix what's safe, and you approve the rest. You'll know exactly what got in.
         </p>
-        <ul className="space-y-3 pt-2">
-          {steps.map(([t, d], i) => (
-            <li key={t} className="flex gap-4 items-baseline">
-              <span className="font-mono text-xs text-slate-400 w-6">{String(i + 1).padStart(2, '0')}</span>
-              <span><span className="font-medium">{t}.</span> <span className="text-slate-600">{d}</span></span>
-            </li>
-          ))}
-        </ul>
+        <div className="rounded-2xl bg-white/80 backdrop-blur border border-slate-200 shadow-[0_20px_40px_-24px_rgba(15,23,42,.25)] p-5 max-w-md" aria-live="polite">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Live preview</span>
+            <span className={`text-xs font-medium ${toneCls}`} key={'t' + tick}>{toneTag}</span>
+          </div>
+          <div key={tick} className="swap grid grid-cols-[90px_1fr] gap-x-4 gap-y-1.5 items-baseline">
+            <span className="text-xs text-slate-400">{label}</span>
+            <span className="font-mono text-sm text-slate-400 line-through decoration-red-400/70">{from}</span>
+            <span />
+            <span className={`font-mono text-sm font-medium ${toneCls}`}>→ {to}</span>
+          </div>
+          <div className="flex gap-1 mt-4">
+            {DEMO.map((_, n) => (
+              <button key={n} aria-label={`Show example ${n + 1}`} onClick={() => setTick(n)}
+                className={`h-1 flex-1 rounded-full transition-colors ${n === tick % DEMO.length ? 'bg-slate-900' : 'bg-slate-200 hover:bg-slate-300'}`} />
+            ))}
+          </div>
+        </div>
       </div>
-      <div className="space-y-4">
+      <div className="space-y-4 relative">
+        <div className="hidden xl:block absolute -top-24 -right-16 z-10 hover:z-20">
+          <SpinningSheet />
+        </div>
         <label
+          onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); e.currentTarget.style.setProperty('--mx', `${e.clientX - r.left}px`); e.currentTarget.style.setProperty('--my', `${e.clientY - r.top}px`) }}
           onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
           onDragLeave={() => setDrag(false)}
           onDrop={(e) => { e.preventDefault(); setDrag(false); readFiles(e.dataTransfer.files) }}
-          className={`dropzone-ring ${drag ? 'is-drag scale-[1.01]' : ''} group block rounded-3xl px-10 py-20 text-center cursor-pointer shadow-[0_1px_2px_rgba(15,23,42,.04),0_24px_48px_-24px_rgba(15,23,42,.18)] transition-transform duration-300 focus-within:ring-2 focus-within:ring-violet-400`}
+          className={`dropzone-ring relative overflow-hidden ${drag ? 'is-drag scale-[1.01]' : ''} group block rounded-3xl px-10 py-20 text-center cursor-pointer shadow-[0_1px_2px_rgba(15,23,42,.04),0_24px_48px_-24px_rgba(15,23,42,.18)] transition-transform duration-300 focus-within:ring-2 focus-within:ring-violet-400`}
         >
+          <div aria-hidden className="spot absolute inset-0 pointer-events-none" />
           <input type="file" multiple accept=".csv,.xlsx,.xls,text/csv" className="sr-only" onChange={(e) => readFiles(e.target.files)} />
           <div className="mx-auto mb-6 w-14 h-14 rounded-2xl bg-slate-950 text-white grid place-items-center transition-transform duration-300 group-hover:-translate-y-1">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -200,6 +280,7 @@ function Upload({ onText, onFiles, existingCount, onViewItems }) {
           <button onClick={onViewItems} className="ml-auto text-sm text-slate-600 hover:text-slate-900 underline underline-offset-4 decoration-slate-300">View {existingCount} imported items →</button>
         </div>
       </div>
+    </div>
     </div>
   )
 }
