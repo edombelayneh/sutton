@@ -3,7 +3,7 @@ import express from 'express'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { validateRows, CATEGORIES, UOMS, FIELDS } from '../shared/schema.js'
+import { validateRows, parseRow, CATEGORIES, UOMS, FIELDS } from '../shared/schema.js'
 import { askJson } from './ai.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -29,6 +29,29 @@ app.get('/api/items', (_req, res) => res.json(load()))
 
 // Remove everything (handy for demos).
 app.delete('/api/items', (_req, res) => { save([]); res.json({ ok: true }) })
+
+// Edit one imported item. Body: { row } as raw strings (same encoding as the CSV). Re-validated here.
+app.put('/api/items/:sku', (req, res) => {
+  const items = load()
+  const idx = items.findIndex((i) => i.sku === req.params.sku)
+  if (idx < 0) return res.status(404).json({ error: 'Item not found' })
+  const { item, errors } = parseRow(req.body?.row || {})
+  if (item.sku && item.sku !== req.params.sku && items.some((i) => i.sku === item.sku))
+    errors.sku = 'This SKU already exists in the system'
+  if (Object.keys(errors).length) return res.status(400).json({ errors })
+  items[idx] = { ...item, imported_at: items[idx].imported_at, updated_at: new Date().toISOString() }
+  save(items)
+  res.json(items[idx])
+})
+
+// Delete one imported item.
+app.delete('/api/items/:sku', (req, res) => {
+  const items = load()
+  const next = items.filter((i) => i.sku !== req.params.sku)
+  if (next.length === items.length) return res.status(404).json({ error: 'Item not found' })
+  save(next)
+  res.json({ ok: true })
+})
 
 // Import rows of raw strings. The server re-validates everything: it is the source of truth.
 // Valid rows are saved; invalid rows are returned with reasons. Partial import is intentional.

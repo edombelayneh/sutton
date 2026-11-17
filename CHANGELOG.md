@@ -2,6 +2,21 @@
 
 Newest entries at the top.
 
+## Imported items is now a full-screen page
+- **Imported items opens full screen (not a side panel)**, with ← Back, a search box, and **"Import another file" always visible in the header**. Clicking an item still opens the detail/edit panel on the right. Why: the list deserves the full width, and the next action stays in direct view.
+
+## Results: "View imported items" button
+- **Added a "View imported items" button next to "Import another file" on the Results page.** Why: right after an import, the natural next step is to check what's now in the system.
+
+## Edit and delete imported items
+- **`PUT /api/items/:sku` and `DELETE /api/items/:sku`.** Edits are sent as raw strings and **re-validated on the server** with the same `parseRow` rules as import, including SKU uniqueness if the SKU changes. Why: an edit must never let bad data in through the back door.
+- **"Edit item" in the detail panel reuses the Review edit panel** (same grouped fields, size boxes, vendor list, no JSON), with live validation and a **Save changes** button that's disabled until the item is valid. Why: one editing experience for the whole app.
+- **"Delete" asks "Delete SKU (name) from the system? This can't be undone."** Why: deleting is permanent, so it's always confirmed.
+- The header's item count refreshes after edits/deletes.
+
+## Imported item detail panel
+- **Clicking an item in "Imported items" opens a read-only detail panel**: Basics (category and unit in words, description, tags as chips), Stock & cost, Dates (including import time), Size (L × W × H), and Vendors as a list with ★ preferred, vendor SKU, lead time and cost. Why: the same click-a-row-to-see-everything pattern as Review; the admin can verify exactly what got in, with no JSON.
+
 ## Navigation back + view imported items
 - **Steps in the header and the Sutton logo are clickable to go back.** Leaving Map or Review asks "Leave this import? Your changes to this file will be lost." first. Why: the admin was stuck moving forward only, but shouldn't lose edits by a mis-click.
 - **"Imported items" view** (header button with a count, plus "View N imported items →" on the Upload page): a searchable list of everything already in the system (SKU, item with size/vendors/tags as text, category, cost, stock, import time), newest first, no JSON. Why: the admin needs to trust what's already in, and check a SKU before re-importing.

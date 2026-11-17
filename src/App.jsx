@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import Papa from 'papaparse'
-import { FIELDS, FIELD_KEYS, autoMapHeaders, applyMapping, validateRows } from '../shared/schema.js'
+import { FIELDS, FIELD_KEYS, autoMapHeaders, applyMapping, validateRows, parseRow } from '../shared/schema.js'
 import { autoFixRow, generateSku } from '../shared/autofix.js'
 import { createPortal } from 'react-dom'
 import { EditPanel, CAT_LABEL, FIELD_LABEL, money, count, sizeText, vendorsText } from './review-ui.jsx'
@@ -118,9 +118,10 @@ export default function App() {
           <Review rows={rows} setRows={setRows} existingSkus={existingSkus} onBack={() => setStep(1)}
             onImported={(res, sent) => { setResult({ ...res, sent }); setStep(3); refreshExisting() }} />
         )}
-        {step === 3 && result && <Results result={result} onRestart={reset} />}
+        {step === 3 && result && <Results result={result} onRestart={reset} onViewItems={() => setShowItems(true)} />}
       </main>
-      {showItems && <ImportedItems onClose={() => setShowItems(false)} />}
+      {showItems && <ImportedItems onClose={() => setShowItems(false)} onChanged={refreshExisting}
+        onImportAnother={() => { if (step === 1 || step === 2) { if (!window.confirm('Leave this import? Your changes to this file will be lost.')) return } setShowItems(false); reset() }} />}
     </div>
   )
 }
@@ -553,28 +554,59 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
   )
 }
 
-function ImportedItems({ onClose }) {
+function ImportedItems({ onClose, onChanged, onImportAnother }) {
   const [items, setItems] = useState(null)
   const [q, setQ] = useState('')
-  useEffect(() => { fetch('/api/items').then((r) => r.json()).then(setItems).catch(() => setItems([])) }, [])
+  const [sel, setSel] = useState(null)
+  const [editing, setEditing] = useState(null) // raw-string row being edited
+  const [serverErr, setServerErr] = useState({})
+  const reload = () => fetch('/api/items').then((r) => r.json()).then(setItems).catch(() => setItems([]))
+  useEffect(() => { reload() }, [])
+
+  // Turn a stored item back into the raw-string row the edit panel understands.
+  const toRaw = (it) => ({
+    sku: it.sku, name: it.name ?? '', description: it.description ?? '', category: it.category ?? '', uom: it.uom ?? '',
+    unit_cost: it.unit_cost != null ? String(it.unit_cost) : '', quantity_on_hand: it.quantity_on_hand != null ? String(it.quantity_on_hand) : '',
+    reorder_point: it.reorder_point != null ? String(it.reorder_point) : '', is_active: it.is_active === false ? 'false' : 'true',
+    lot_tracked: it.lot_tracked ? 'true' : 'false', tags: (it.tags || []).join(';'),
+    first_received_on: it.first_received_on ?? '', discontinued_on: it.discontinued_on ?? '',
+    dimensions: it.dimensions ? JSON.stringify(it.dimensions) : '', vendors: it.vendors?.length ? JSON.stringify(it.vendors) : '',
+  })
+  const del = async (it) => {
+    if (!window.confirm(`Delete ${it.sku} (${it.name}) from the system? This can't be undone.`)) return
+    await fetch(`/api/items/${encodeURIComponent(it.sku)}`, { method: 'DELETE' })
+    setSel(null); reload(); onChanged?.()
+  }
+  const saveEdit = async () => {
+    const res = await fetch(`/api/items/${encodeURIComponent(sel.sku)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ row: editing }),
+    })
+    const data = await res.json()
+    if (!res.ok) return setServerErr(data.errors || { name: data.error })
+    setEditing(null); setServerErr({}); setSel(data); reload(); onChanged?.()
+  }
+  const editErrors = editing ? { ...parseRow(editing).errors, ...serverErr } : {}
   const list = (items || []).slice().reverse()
     .filter((it) => !q || `${it.sku} ${it.name}`.toLowerCase().includes(q.toLowerCase()))
   const dims = (d) => (d ? `${d.length} × ${d.width} × ${d.height} ${d.unit || 'cm'}` : '')
   const vend = (v) => (v?.length ? `${v.length} vendor${v.length > 1 ? 's' : ''}${v.find((x) => x.is_preferred) ? ` · ★ ${v.find((x) => x.is_preferred).vendor_name}` : ''}` : '')
   return createPortal(
-    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-label="Imported items">
-      <div className="absolute inset-0 bg-slate-900/20" onClick={onClose} />
-      <aside className="relative w-full max-w-4xl h-full bg-white shadow-2xl flex flex-col animate-slide">
-        <header className="px-6 py-4 border-b border-slate-100 flex items-center gap-4">
+    <div className="fixed inset-0 z-50 bg-slate-50 flex flex-col animate-rise" role="dialog" aria-label="Imported items">
+      <header className="bg-white border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-4 flex-wrap">
+          <button className="px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100" onClick={onClose}>← Back</button>
           <div>
-            <div className="font-semibold">Imported items</div>
-            <div className="text-xs text-slate-500">{items ? `${items.length} items already in the system` : 'Loading…'}</div>
+            <div className="text-xl font-semibold tracking-tight">Imported items</div>
+            <div className="text-xs text-slate-500">{items ? `${items.length} items in the system · click any item to view, edit or delete` : 'Loading…'}</div>
           </div>
           <input autoFocus placeholder="Search SKU or name…" value={q} onChange={(e) => setQ(e.target.value)}
-            className="ml-auto w-64 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-          <button className="w-8 h-8 rounded-lg hover:bg-slate-100" title="Close" onClick={onClose}>✕</button>
-        </header>
-        <div className="flex-1 overflow-auto">
+            className="ml-auto w-72 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+          <button className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800" onClick={onImportAnother}>Import another file</button>
+        </div>
+      </header>
+      <div className="flex-1 overflow-auto">
+        <div className="max-w-6xl mx-auto px-6 py-6">
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-white text-left text-xs text-slate-400 border-b border-slate-100">
               <tr><th className="py-3 pl-6 pr-3 font-medium">SKU</th><th className="px-3 font-medium">Item</th><th className="px-3 font-medium">Category</th>
@@ -582,7 +614,7 @@ function ImportedItems({ onClose }) {
             </thead>
             <tbody>
               {list.map((it) => (
-                <tr key={it.sku} className="border-b border-slate-50">
+                <tr key={it.sku} onClick={() => setSel(it)} className={`border-b border-slate-50 cursor-pointer hover:bg-slate-50 ${sel?.sku === it.sku ? 'bg-indigo-50/60' : ''}`}>
                   <td className="py-3 pl-6 pr-3 font-mono text-xs whitespace-nowrap">{it.sku}</td>
                   <td className="px-3 max-w-[280px]">
                     <div className="font-medium truncate">{it.name}{it.is_active === false && <span className="ml-2 text-xs text-slate-400">inactive</span>}</div>
@@ -598,13 +630,98 @@ function ImportedItems({ onClose }) {
             </tbody>
           </table>
         </div>
-      </aside>
+        </div>
+      </div>
+      {sel && !editing && <ItemDetail item={sel} onClose={() => setSel(null)} onEdit={() => { setServerErr({}); setEditing(toRaw(sel)) }} onDelete={() => del(sel)} />}
+      {editing && (
+        <EditPanel i={0} title={`Editing ${sel.sku}`} row={editing} errors={editErrors}
+          statusBadge={Object.keys(editErrors).length ? <span className="text-xs font-medium text-red-700">{Object.keys(editErrors).length} to fix</span> : <span className="text-xs font-medium text-emerald-700">Looks good</span>}
+          onEdit={(k, v) => { setServerErr({}); setEditing({ ...editing, [k]: v }) }} onKeep={() => {}} onUndo={() => {}}
+          onClose={() => setEditing(null)}
+          footer={
+            <footer className="px-6 py-3 border-t border-slate-100 flex items-center gap-2">
+              <button className="text-sm text-slate-500 hover:text-slate-900" onClick={() => setEditing(null)}>Cancel</button>
+              <button disabled={Object.keys(parseRow(editing).errors).length > 0} onClick={saveEdit}
+                className="ml-auto px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium disabled:opacity-40">Save changes</button>
+            </footer>
+          } />
+      )}
     </div>,
     document.body,
   )
 }
 
-function Results({ result, onRestart }) {
+const UOM_WORD = { EA: 'Each', BX: 'Box', KG: 'Kilogram', M: 'Meter', L: 'Liter' }
+
+function ItemDetail({ item: it, onClose, onEdit, onDelete }) {
+  const Row = ({ label, children }) => (
+    <div className="flex py-2 border-b border-slate-50 text-sm">
+      <span className="w-40 shrink-0 text-slate-500">{label}</span>
+      <span className="flex-1">{children ?? <span className="text-slate-300">–</span>}</span>
+    </div>
+  )
+  const d = it.dimensions
+  return (
+    <aside className="fixed right-0 top-[77px] bottom-0 w-full max-w-md bg-white shadow-2xl border-l border-slate-200 flex flex-col animate-slide z-10" aria-label={`Item ${it.sku}`}>
+      <header className="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="font-mono text-xs text-slate-400">{it.sku}</div>
+          <div className="font-semibold truncate">{it.name}</div>
+        </div>
+        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${it.is_active === false ? 'bg-slate-100 text-slate-500' : 'bg-emerald-50 text-emerald-700'}`}>{it.is_active === false ? 'Inactive' : 'Active'}</span>
+        <button className="w-8 h-8 rounded-lg hover:bg-slate-100" title="Close" onClick={onClose}>✕</button>
+      </header>
+      <div className="px-6 py-3 border-b border-slate-100 flex gap-2">
+        <button className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800" onClick={onEdit}>Edit item</button>
+        <button className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 text-sm hover:bg-red-50" onClick={onDelete}>Delete</button>
+      </div>
+      <div className="flex-1 overflow-auto px-6 py-4 space-y-6">
+        <section>
+          <h3 className="text-sm font-semibold mb-1">Basics</h3>
+          <Row label="Category">{CAT_LABEL[it.category] || it.category}</Row>
+          <Row label="Unit of measure">{UOM_WORD[it.uom] || it.uom}</Row>
+          <Row label="Description">{it.description}</Row>
+          <Row label="Tags">{it.tags?.length ? <span className="flex flex-wrap gap-1">{it.tags.map((t) => <span key={t} className="px-2 py-0.5 rounded-md bg-slate-100 text-xs">{t}</span>)}</span> : null}</Row>
+        </section>
+        <section>
+          <h3 className="text-sm font-semibold mb-1">Stock & cost</h3>
+          <Row label="Unit cost">{money(String(it.unit_cost))}</Row>
+          <Row label="Quantity on hand">{count(String(it.quantity_on_hand ?? 0))}</Row>
+          <Row label="Reorder point">{it.reorder_point != null ? count(String(it.reorder_point)) : null}</Row>
+          <Row label="Lot tracked">{it.lot_tracked ? 'Yes' : 'No'}</Row>
+        </section>
+        <section>
+          <h3 className="text-sm font-semibold mb-1">Dates</h3>
+          <Row label="First received">{it.first_received_on}</Row>
+          <Row label="Discontinued">{it.discontinued_on}</Row>
+          <Row label="Imported">{it.imported_at ? new Date(it.imported_at).toLocaleString() : null}</Row>
+        </section>
+        <section>
+          <h3 className="text-sm font-semibold mb-1">Size</h3>
+          <Row label="L × W × H">{d ? `${d.length} × ${d.width} × ${d.height} ${d.unit || 'cm'}` : null}</Row>
+        </section>
+        <section>
+          <h3 className="text-sm font-semibold mb-2">Vendors</h3>
+          {it.vendors?.length ? (
+            <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
+              {it.vendors.map((v, n) => (
+                <div key={n} className="px-3 py-2.5 text-sm flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{v.is_preferred && <span className="text-amber-500" title="Preferred">★ </span>}{v.vendor_name}</div>
+                    <div className="text-xs text-slate-400">{[v.vendor_sku, v.lead_time_days != null && `${v.lead_time_days} day lead time`].filter(Boolean).join(' · ') || 'No vendor SKU'}</div>
+                  </div>
+                  <div className="tabular-nums">{money(String(v.unit_cost))}</div>
+                </div>
+              ))}
+            </div>
+          ) : <p className="text-sm text-slate-300">No vendors</p>}
+        </section>
+      </div>
+    </aside>
+  )
+}
+
+function Results({ result, onRestart, onViewItems }) {
   const skipped = result.sent.skipped
   const downloadSkipped = () => {
     const csv = Papa.unparse(skipped.map((s) => ({ ...s.row, _errors: Object.entries(s.errors).map(([k, v]) => `${k}: ${v}`).join(' | ') })))
@@ -639,7 +756,10 @@ function Results({ result, onRestart }) {
           </ul>
         </div>
       )}
-      <button className="px-5 py-2.5 rounded-full bg-slate-950 text-white font-medium hover:bg-slate-800 transition-colors shadow-sm" onClick={onRestart}>Import another file</button>
+      <div className="flex flex-wrap gap-3">
+        <button className="px-5 py-2.5 rounded-full bg-slate-950 text-white font-medium hover:bg-slate-800 transition-colors shadow-sm" onClick={onRestart}>Import another file</button>
+        <button className="px-5 py-2.5 rounded-full border border-slate-300 bg-white font-medium hover:border-slate-500 transition-colors" onClick={onViewItems}>View imported items</button>
+      </div>
     </div>
   )
 }

@@ -147,7 +147,7 @@ function VendorEditor({ value, onChange }) {
 
 const bool = [['true', 'Yes'], ['false', 'No']]
 
-export function EditPanel({ i, row, errors, statusBadge, dup, onEdit, onKeep, onUndo, onClose, onPrev, onNext, onSkip, dupActions }) {
+export function EditPanel({ i, title, row, errors, statusBadge, dup, onEdit, onKeep, onUndo, onClose, onPrev, onNext, onSkip, dupActions, footer }) {
   const F = (k, children, extra = {}) => (
     <Field k={k} row={row} err={errors[k]} onEdit={onEdit} onKeep={onKeep} onUndo={onUndo} {...extra}>{children}</Field>
   )
@@ -157,13 +157,13 @@ export function EditPanel({ i, row, errors, statusBadge, dup, onEdit, onKeep, on
       <aside className="relative w-full max-w-xl h-full bg-white shadow-2xl flex flex-col animate-slide">
         <header className="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
           <div className="flex-1 min-w-0">
-            <div className="text-xs text-slate-400">Row {i + 1}</div>
+            <div className="text-xs text-slate-400">{title ?? `Row ${i + 1}`}</div>
             <div className="font-semibold truncate">{row.name || 'Unnamed item'}</div>
           </div>
           {statusBadge}
           <div className="flex gap-1">
-            <button className="w-8 h-8 rounded-lg border border-slate-200 hover:bg-slate-50" title="Previous row needing attention" onClick={onPrev}>↑</button>
-            <button className="w-8 h-8 rounded-lg border border-slate-200 hover:bg-slate-50" title="Next row needing attention" onClick={onNext}>↓</button>
+            {onPrev && <button className="w-8 h-8 rounded-lg border border-slate-200 hover:bg-slate-50" title="Previous row needing attention" onClick={onPrev}>↑</button>}
+            {onNext && <button className="w-8 h-8 rounded-lg border border-slate-200 hover:bg-slate-50" title="Next row needing attention" onClick={onNext}>↓</button>}
             <button className="w-8 h-8 rounded-lg hover:bg-slate-100" title="Close" onClick={onClose}>✕</button>
           </div>
         </header>
@@ -206,10 +206,10 @@ export function EditPanel({ i, row, errors, statusBadge, dup, onEdit, onKeep, on
             {F('vendors', () => <VendorEditor value={row.vendors} onChange={(v) => onEdit('vendors', v)} />, { hideFixFrom: true })}
           </section>
         </div>
-        <footer className="px-6 py-3 border-t border-slate-100 flex items-center">
+        {footer ?? <footer className="px-6 py-3 border-t border-slate-100 flex items-center">
           <button className="text-sm text-slate-500 hover:text-red-600" onClick={onSkip}>Skip this row</button>
           <button className="ml-auto px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium" onClick={onNext}>Next issue →</button>
-        </footer>
+        </footer>}
       </aside>
     </div>,
     document.body,
