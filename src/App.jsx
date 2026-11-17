@@ -211,14 +211,29 @@ function Upload({ onText, onFiles, existingCount, onViewItems }) {
     return () => clearInterval(t)
   }, [])
   const [label, from, to, tone] = DEMO[tick % DEMO.length]
+  const WORDS = ['mess.', 'typos.', 'duplicates.', '$ signs.', 'dates.', 'Excel quirks.']
+  const word = WORDS[tick % WORDS.length]
+  const FRAGS = ['$23.98', 'yes', 'ea', 'Jan 7, 2024', '1,200', 'fxbu-khm', '0,26', 'TRUE', 'Raw Material', ' Oak Cart ', 'TBD', 'METAL']
+  const [stat, setStat] = useState(0)
+  useEffect(() => { let n = 0; const t = setInterval(() => { n += 1; setStat(n); if (n >= 30) clearInterval(t) }, 30); return () => clearInterval(t) }, [])
+  const S = (target) => Math.round((target * Math.min(stat, 30)) / 30)
+  const onMove = (e) => {
+    const el = e.currentTarget, r = el.getBoundingClientRect()
+    el.style.setProperty('--px', ((e.clientX - r.left) / r.width * 2 - 1).toFixed(3))
+    el.style.setProperty('--py', ((e.clientY - r.top) / r.height * 2 - 1).toFixed(3))
+  }
   const toneCls = { emerald: 'text-emerald-600', violet: 'text-violet-600', orange: 'text-orange-600' }[tone]
   const toneTag = { emerald: 'Auto-fixed', violet: 'AI suggestion', orange: 'Duplicate resolved' }[tone]
   return (
-    <div className="relative">
-      <div aria-hidden className="absolute -inset-x-40 -top-24 h-[620px] -z-10 overflow-hidden">
-        <div className="aurora w-[520px] h-[520px] bg-violet-300 left-[8%] top-0" />
-        <div className="aurora w-[460px] h-[460px] bg-emerald-200 right-[6%] top-24" style={{ animationDelay: '-5s' }} />
-        <div className="aurora w-[380px] h-[380px] bg-sky-200 left-[40%] top-56" style={{ animationDelay: '-9s' }} />
+    <div className="relative landing" onMouseMove={onMove} onMouseLeave={(e) => { e.currentTarget.style.setProperty('--px', 0); e.currentTarget.style.setProperty('--py', 0) }}>
+      <div aria-hidden className="absolute -inset-x-40 -top-24 h-[680px] -z-10 overflow-hidden">
+        <div className="px absolute inset-0" style={{ '--d': '-40px' }}><div className="aurora w-[520px] h-[520px] bg-violet-300 left-[8%] top-0" /></div>
+        <div className="px absolute inset-0" style={{ '--d': '30px' }}><div className="aurora w-[460px] h-[460px] bg-emerald-200 right-[6%] top-24" style={{ animationDelay: '-5s' }} /></div>
+        <div className="px absolute inset-0" style={{ '--d': '-20px' }}><div className="aurora w-[380px] h-[380px] bg-sky-200 left-[40%] top-56" style={{ animationDelay: '-9s' }} /></div>
+        {FRAGS.map((f, n) => (
+          <span key={f} className="frag font-mono text-xs px-2 py-1 rounded-md bg-white/70 backdrop-blur border border-red-200 text-red-500/80 shadow-sm"
+            style={{ left: `${(n * 83) % 100}%`, '--t': `${12 + (n % 5) * 2}s`, '--delay': `${-n * 1.7}s`, '--r': `${(n % 2 ? 1 : -1) * (4 + n % 6)}deg` }}>{f}</span>
+        ))}
       </div>
     <div className="grid lg:grid-cols-[1fr_1.1fr] gap-12 items-center min-h-[calc(100vh-10rem)] stagger">
       <div className="space-y-6">
@@ -227,12 +242,18 @@ function Upload({ onText, onFiles, existingCount, onViewItems }) {
         </span>
         <h1 className="text-5xl md:text-6xl font-semibold tracking-[-0.04em] leading-[0.98]">
           Bring the spreadsheet.<br />
-          <span className="bg-gradient-to-r from-violet-600 via-sky-500 to-emerald-500 bg-clip-text text-transparent">We'll handle the mess.</span>
+          <span className="bg-gradient-to-r from-violet-600 via-sky-500 to-emerald-500 bg-clip-text text-transparent">We'll handle the </span>
+          <span key={word} className="word bg-gradient-to-r from-sky-500 to-emerald-500 bg-clip-text text-transparent">{word}</span>
         </h1>
         <p className="text-lg text-slate-600 max-w-md leading-relaxed">
           Drop in your inventory files as they are. We map the columns, fix what's safe, and you approve the rest. You'll know exactly what got in.
         </p>
-        <div className="rounded-2xl bg-white/80 backdrop-blur border border-slate-200 shadow-[0_20px_40px_-24px_rgba(15,23,42,.25)] p-5 max-w-md" aria-live="polite">
+        <div className="flex gap-6 text-sm">
+          {[[200, 'rows checked'], [34, 'auto-fixes'], [6, 'duplicates caught'], [0, 'surprises']].map(([n, l]) => (
+            <div key={l}><div className="text-2xl font-semibold tabular-nums tracking-tight">{S(n)}</div><div className="text-slate-500 text-xs">{l}</div></div>
+          ))}
+        </div>
+        <div className="px rounded-2xl bg-white/80 backdrop-blur border border-slate-200 shadow-[0_20px_40px_-24px_rgba(15,23,42,.25)] p-5 max-w-md" style={{ '--d': '8px' }} aria-live="polite">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Live preview</span>
             <span className={`text-xs font-medium ${toneCls}`} key={'t' + tick}>{toneTag}</span>
@@ -252,7 +273,7 @@ function Upload({ onText, onFiles, existingCount, onViewItems }) {
         </div>
       </div>
       <div className="space-y-4 relative">
-        <div className="hidden xl:block absolute -top-24 -right-16 z-10 hover:z-20">
+        <div className="px hidden xl:block absolute -top-24 -right-16 z-10 hover:z-20" style={{ '--d': '-22px' }}>
           <SpinningSheet />
         </div>
         <label
@@ -260,7 +281,7 @@ function Upload({ onText, onFiles, existingCount, onViewItems }) {
           onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
           onDragLeave={() => setDrag(false)}
           onDrop={(e) => { e.preventDefault(); setDrag(false); readFiles(e.dataTransfer.files) }}
-          className={`dropzone-ring relative overflow-hidden ${drag ? 'is-drag scale-[1.01]' : ''} group block rounded-3xl px-10 py-20 text-center cursor-pointer shadow-[0_1px_2px_rgba(15,23,42,.04),0_24px_48px_-24px_rgba(15,23,42,.18)] transition-transform duration-300 focus-within:ring-2 focus-within:ring-violet-400`}
+          className={`tilt dropzone-ring relative overflow-hidden ${drag ? 'is-drag scale-[1.01]' : ''} group block rounded-3xl px-10 py-20 text-center cursor-pointer shadow-[0_1px_2px_rgba(15,23,42,.04),0_24px_48px_-24px_rgba(15,23,42,.18)] transition-transform duration-300 focus-within:ring-2 focus-within:ring-violet-400`}
         >
           <div aria-hidden className="spot absolute inset-0 pointer-events-none" />
           <input type="file" multiple accept=".csv,.xlsx,.xls,text/csv" className="sr-only" onChange={(e) => readFiles(e.target.files)} />

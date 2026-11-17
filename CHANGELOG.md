@@ -2,6 +2,14 @@
 
 Newest entries at the top.
 
+## Landing: the whole page moves
+- **Mouse parallax**: the aurora glows, the 3D sheet and the live-preview card shift at different depths as the cursor moves; **the drop zone tilts toward the cursor** in 3D.
+- **Rotating headline word**: "We'll handle the mess. / typos. / duplicates. / $ signs. / dates. / Excel quirks."
+- **Floating messy fragments** (`$23.98`, `yes`, `ea`, `Jan 7, 2024`, `1,200`, `TBD`, …) drift up behind the content at low opacity so the text stays readable.
+- **Count-up stats** from the messy sample: 200 rows checked · 34 auto-fixes · 6 duplicates caught · 0 surprises.
+- Why: the user wanted the landing page to feel alive; every moving piece shows the product's job (messy in, clean out). All of it is disabled under `prefers-reduced-motion`.
+- Bug caught in the screenshot: parallax wrappers collapsed the aurora into a corner (a transformed parent becomes the containing block); fixed by making the wrappers fill the area.
+
 ## Landing: 3D "self-cleaning" Excel sheet
 - **A small 3D spreadsheet (`inventory.xlsx`) floats over the drop zone, tilting and swaying in 3D.** Its red messy cells (`fxbu-khm`, `$23.98`, `0,26`, `Jan 7, 24`) **flip one by one into green ✓ clean values** with a live "N/12 fixed" counter, then loop. **Hovering it spins it 360°.** Why: an eye-catching, on-message visual: you drop a messy sheet in and it cleans itself. Shown on wide screens only (xl+) so it never crowds the drop zone; static under `prefers-reduced-motion`.
 
