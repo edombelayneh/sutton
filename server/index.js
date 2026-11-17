@@ -11,12 +11,22 @@ const DATA_DIR = path.join(__dirname, '..', 'data')
 const STORE = path.join(DATA_DIR, 'items.json')
 const PORT = process.env.API_PORT || 3001
 
-const load = () => {
-  try { return JSON.parse(fs.readFileSync(STORE, 'utf8')) } catch { return [] }
+// Missing file = empty store. A file that exists but can't be parsed is an error: never treat it
+// as empty, or the next save would wipe every item.
+const readJson = (file, empty) => {
+  if (!fs.existsSync(file)) return empty
+  return JSON.parse(fs.readFileSync(file, 'utf8'))
 }
-const save = (items) => {
+// Atomic write: write a temp file, then rename over the real one, so a crash can't leave half a file.
+const writeJson = (file, data) => {
   fs.mkdirSync(DATA_DIR, { recursive: true })
-  fs.writeFileSync(STORE, JSON.stringify(items, null, 2))
+  const tmp = `${file}.${process.pid}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2))
+  fs.renameSync(tmp, file)
+}
+const load = () => readJson(STORE, [])
+const save = (items) => {
+  writeJson(STORE, items)
 }
 
 const app = express()
@@ -28,7 +38,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, ai: Boolean(process.e
 app.get('/api/items', (_req, res) => res.json(load()))
 
 // Remove everything (handy for demos).
-app.delete('/api/items', (_req, res) => { save([]); res.json({ ok: true }) })
+app.delete('/api/items', (_req, res) => { save([]); saveBatches({}); res.json({ ok: true }) })
 
 // Edit one imported item. Body: { row } as raw strings (same encoding as the CSV). Re-validated here.
 app.put('/api/items/:sku', (req, res) => {
@@ -55,24 +65,56 @@ app.delete('/api/items/:sku', (req, res) => {
 
 // Import rows of raw strings. The server re-validates everything: it is the source of truth.
 // Valid rows are saved; invalid rows are returned with reasons. Partial import is intentional.
+const BATCHES = path.join(DATA_DIR, 'batches.json')
+const loadBatches = () => readJson(BATCHES, {})
+const saveBatches = (b) => writeJson(BATCHES, b)
+
 app.post('/api/import', (req, res) => {
-  const rows = req.body?.rows
-  if (!Array.isArray(rows)) return res.status(400).json({ error: 'Body must be { rows: [...] }' })
+  if (!Array.isArray(req.body?.rows)) return res.status(400).json({ error: 'Body must be { rows: [...] }' })
+  // Anything that isn't a plain object becomes an empty row, so it's rejected with reasons instead of crashing.
+  const rows = req.body.rows.map((r) => (r && typeof r === 'object' && !Array.isArray(r) ? r : {}))
+  const updates = new Set(req.body?.updates || []) // SKUs the user chose to update instead of reject
   const existing = load()
-  const results = validateRows(rows, new Set(existing.map((i) => i.sku)))
+  const results = validateRows(rows, new Set(existing.map((i) => i.sku).filter((k) => !updates.has(k))))
+  const batch = Date.now().toString(36)
+  const now = new Date().toISOString()
+  const bySku = new Map(existing.map((i) => [i.sku, i]))
   const imported = []
+  const previous = [] // versions replaced by updates, so undo can restore them
   const rejected = []
   results.forEach((r, i) => {
-    if (r.valid) imported.push({ ...r.item, imported_at: new Date().toISOString() })
-    else rejected.push({ index: i, sku: rows[i].sku, errors: r.errors })
+    if (!r.valid) return rejected.push({ index: i, sku: rows[i].sku, errors: r.errors })
+    const old = bySku.get(r.item.sku)
+    if (old) previous.push(old)
+    bySku.set(r.item.sku, { ...r.item, imported_at: now, batch })
+    imported.push(r.item.sku)
   })
-  save([...existing, ...imported])
-  res.json({ imported: imported.map((i) => i.sku), rejected, total: rows.length })
+  save([...bySku.values()])
+  const batches = loadBatches()
+  batches[batch] = { at: now, skus: imported, previous }
+  saveBatches(batches)
+  res.json({ imported, updated: previous.length, rejected, total: rows.length, batch })
+})
+
+// Undo an import: remove what it added and restore what it overwrote.
+app.post('/api/import/:batch/undo', (req, res) => {
+  const batches = loadBatches()
+  const b = Object.hasOwn(batches, req.params.batch) ? batches[req.params.batch] : null
+  if (!b) return res.status(404).json({ error: 'Import not found (already undone?)' })
+  const skus = new Set(b.skus)
+  const kept = load().filter((i) => !(skus.has(i.sku) && i.batch === req.params.batch))
+  // Only restore an old version if nothing else now uses that SKU (a later edit/import may have).
+  const present = new Set(kept.map((i) => i.sku))
+  save([...kept, ...b.previous.filter((p) => !present.has(p.sku))])
+  delete batches[req.params.batch]
+  saveBatches(batches)
+  res.json({ ok: true, removed: b.skus.length, restored: b.previous.length })
 })
 
 
 // ---- AI suggestions for rows that still have errors ----
 const AI_MODEL = process.env.AI_MODEL || 'openrouter/auto'
+const AI_MAX_ROWS = 200
 const RULES = `Inventory item fields (CSV cell encoding, all values are strings):
 - sku: ^[A-Z]{4}-[A-Z0-9]{3}$ (e.g. PACK-7Q2)
 - name: 1-120 chars
@@ -104,8 +146,8 @@ Reply as {"suggestions":[{"index":<row index>,"field":"<field>","value":"<new ce
 
 app.post('/api/ai/suggest', async (req, res) => {
   if (!process.env.OPENROUTER_API_KEY) return res.status(503).json({ error: 'AI is off: add OPENROUTER_API_KEY to .env and restart' })
-  const rows = req.body?.rows
-  if (!Array.isArray(rows)) return res.status(400).json({ error: 'Body must be { rows: [{ index, row, errors }] }' })
+  if (!Array.isArray(req.body?.rows)) return res.status(400).json({ error: 'Body must be { rows: [{ index, row, errors }] }' })
+  const rows = req.body.rows.filter((r) => r && typeof r === 'object').slice(0, AI_MAX_ROWS) // cap cost per request
   const batches = []
   for (let i = 0; i < rows.length; i += 15) batches.push(rows.slice(i, i + 15))
   try {
@@ -150,4 +192,5 @@ Reply as {"mappings":[{"header":"<header>","field":"<field key or null>","why":"
   }
 })
 
-app.listen(PORT, () => console.log(`API listening on http://localhost:${PORT}`))
+// Localhost only: no auth, so never expose the API (or the AI key's spend) to the network.
+app.listen(PORT, '127.0.0.1', () => console.log(`API listening on http://127.0.0.1:${PORT}`))

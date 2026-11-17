@@ -23,6 +23,11 @@ Each feature, why it helps the user, and its status.
 | 15 | No JSON on screen: size as L×W×H + unit, vendors as an editable list with ★ preferred; recovers truncated vendor data | Non-technical users can edit complex fields safely | Done |
 | 16 | Clickable steps / logo to go back (with a "lose changes?" confirm) | Move around freely without losing work by accident | Done |
 | 17 | Searchable "Imported items" view; click an item for details, then Edit (re-validated) or Delete (confirmed) | See and verify everything already in the system, field by field | Done |
+| 18 | Excel upload + multiple files as one batch (with source file + cross-file duplicate check) | Upload what they actually have, all at once | Done |
+| 19 | Update existing items instead of rejecting them | Re-imports (e.g. new stock counts) just work | Done |
+| 20 | Undo this import (restores updated items too) | Mistakes are reversible, so importing feels safe | Done |
+| 21 | "Clear all" imported items (confirmed) | Start fresh for a new system or a demo in one click | Done |
+| 22 | Safe by default: localhost-only API, atomic saves, formula-safe CSV export, patched Excel parser | Their data can't be lost to a crash or exposed on the network | Done |
 | 11 | Live import-health bar + "N/200 ready" counter | Instantly shows how close they are to done | Done |
 | 12 | Guided upload page (Map / Fix / Trust explainer, sample files) | They know what will happen before uploading | Done |
 | 10b | Color-coded sources (purple AI, green fixed, amber guess, orange duplicate, red needs you) + "🤖 AI" filter + Accept all | The admin can tell at a glance who changed what, and review AI work in bulk | Done |

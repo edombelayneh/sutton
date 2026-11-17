@@ -62,8 +62,14 @@ An ops admin. Not a developer. Used to Excel. Wants confidence, not JSON.
 ### Phase 3: Make it pretty (motionsites, only when you say go)
 - [x] Geist type system, dark header stepper, animated drop zone, health bar, results headline, motion with reduced-motion support
 
+### Phase 3b: More features + hardening
+- [x] Excel upload, multiple files, update existing, undo import
+- [x] Imported items page: detail, edit, delete, clear all
+- [x] Security/data review: fixed atomic store, localhost-only, xlsx upgrade, CSV injection, undo duplicates
+- [x] AI request cap, malformed-row handling
+
 ### Phase 4: Ship
-- [ ] Update README, FEATURES, CHANGELOG
+- [x] Update README, FEATURES, CHANGELOG
 - [ ] `npm run zip` and submit (submit early and often)
 
 ## Time checkpoints

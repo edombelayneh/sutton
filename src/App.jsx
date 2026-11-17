@@ -1,12 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
 import Papa from 'papaparse'
+import * as XLSX from 'xlsx'
 import { FIELDS, FIELD_KEYS, autoMapHeaders, applyMapping, validateRows, parseRow } from '../shared/schema.js'
 import { autoFixRow, generateSku } from '../shared/autofix.js'
 import { createPortal } from 'react-dom'
 import { EditPanel, CAT_LABEL, FIELD_LABEL, money, count, sizeText, vendorsText } from './review-ui.jsx'
 
 // Rows carry their auto-fix log in `_fixes`; strip it before sending/exporting.
-const clean = ({ _fixes, ...r }) => r
+const clean = ({ _fixes, _file, _update, ...r }) => r
+
+// Read a CSV or Excel file as CSV text (Excel: first sheet).
+const fileToText = async (f) => {
+  if (/\.(xlsx|xls)$/i.test(f.name)) {
+    const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' })
+    return XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]])
+  }
+  return f.text()
+}
 
 const STEPS = ['Upload', 'Map columns', 'Review & fix', 'Results']
 
@@ -25,12 +35,20 @@ export default function App() {
     fetch('/api/items').then((r) => r.json()).then((items) => setExistingSkus(new Set(items.map((i) => i.sku))))
   useEffect(() => { refreshExisting() }, [])
 
-  const loadText = (text, name) => {
-    const parsed = Papa.parse(text, { header: true, skipEmptyLines: 'greedy' })
-    const hs = parsed.meta.fields.filter((h) => h !== '')
-    setFileName(name)
+  const loadText = (text, name) => loadFiles([{ text, name }])
+  // One or more files become one combined batch; each row remembers its source file.
+  const loadFiles = (files) => {
+    const hs = []
+    const all = []
+    for (const { text, name } of files) {
+      const parsed = Papa.parse(text, { header: true, skipEmptyLines: 'greedy' })
+      for (const h of parsed.meta.fields || []) if (h !== '' && !hs.includes(h)) hs.push(h)
+      for (const r of parsed.data) all.push({ ...r, __file: name })
+    }
+    const parsed = { data: all }
+    setFileName(files.length > 1 ? `${files.length} files` : files[0].name)
     setHeaders(hs)
-    setCsvRows(parsed.data)
+    setCsvRows(all)
     const auto = autoMapHeaders(hs)
     setMapping(auto)
     setResult(null)
@@ -65,7 +83,7 @@ export default function App() {
   const confirmMapping = () => {
     setRows(csvRows.map((r) => {
       const { row, fixes } = autoFixRow(applyMapping(r, mapping))
-      return { ...row, _fixes: fixes }
+      return { ...row, _fixes: fixes, _file: r.__file }
     }))
     setStep(2)
   }
@@ -109,7 +127,7 @@ export default function App() {
         <div className="h-0.5 bg-slate-100"><div className="h-full bg-gradient-to-r from-sky-400 via-violet-400 to-emerald-400 seg" style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} /></div>
       </header>
       <main key={step} className="max-w-6xl mx-auto px-6 py-8 animate-rise">
-        {step === 0 && <Upload onText={loadText} existingCount={existingSkus.size} onViewItems={() => setShowItems(true)} />}
+        {step === 0 && <Upload onText={loadText} onFiles={loadFiles} existingCount={existingSkus.size} onViewItems={() => setShowItems(true)} />}
         {step === 1 && (
           <MapColumns aiMap={aiMap} fileName={fileName} headers={headers} sample={csvRows[0]} mapping={mapping}
             setMapping={setMapping} onBack={() => setStep(0)} onNext={confirmMapping} />
@@ -126,9 +144,13 @@ export default function App() {
   )
 }
 
-function Upload({ onText, existingCount, onViewItems }) {
+function Upload({ onText, onFiles, existingCount, onViewItems }) {
   const [drag, setDrag] = useState(false)
-  const readFile = (f) => f && f.text().then((t) => onText(t, f.name))
+  const readFiles = async (list) => {
+    const files = [...(list || [])].filter((f) => /\.(csv|xlsx|xls)$/i.test(f.name))
+    if (!files.length) return
+    onFiles(await Promise.all(files.map(async (f) => ({ name: f.name, text: await fileToText(f) }))))
+  }
   const loadSample = (name) => fetch(`/samples/${name}`).then((r) => r.text()).then((t) => onText(t, name))
   const steps = [
     ['Map', 'We match your column names to ours, with AI for the odd ones.'],
@@ -158,17 +180,18 @@ function Upload({ onText, existingCount, onViewItems }) {
         <label
           onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
           onDragLeave={() => setDrag(false)}
-          onDrop={(e) => { e.preventDefault(); setDrag(false); readFile(e.dataTransfer.files[0]) }}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); readFiles(e.dataTransfer.files) }}
           className={`dropzone-ring ${drag ? 'is-drag scale-[1.01]' : ''} group block rounded-3xl px-10 py-20 text-center cursor-pointer shadow-[0_1px_2px_rgba(15,23,42,.04),0_24px_48px_-24px_rgba(15,23,42,.18)] transition-transform duration-300 focus-within:ring-2 focus-within:ring-violet-400`}
         >
-          <input type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => readFile(e.target.files[0])} />
+          <input type="file" multiple accept=".csv,.xlsx,.xls,text/csv" className="sr-only" onChange={(e) => readFiles(e.target.files)} />
           <div className="mx-auto mb-6 w-14 h-14 rounded-2xl bg-slate-950 text-white grid place-items-center transition-transform duration-300 group-hover:-translate-y-1">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
-          <p className="text-xl font-medium tracking-tight">{drag ? 'Drop it.' : 'Drop your inventory CSV here'}</p>
+          <p className="text-xl font-medium tracking-tight">{drag ? 'Drop them.' : 'Drop your inventory files here'}</p>
           <p className="text-slate-500 mt-1.5">or <span className="text-slate-900 underline underline-offset-4 decoration-slate-300">browse your computer</span></p>
+          <p className="text-xs text-slate-400 mt-3">CSV or Excel · several files at once are reviewed together</p>
         </label>
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-slate-500 mr-1">No file handy?</span>
@@ -241,7 +264,10 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
   const [aiOn, setAiOn] = useState(false)
   const [ai, setAi] = useState({ busy: false, msg: '' })
   useEffect(() => { fetch('/api/health').then((r) => r.json()).then((h) => setAiOn(h.ai)).catch(() => {}) }, [])
-  const results = useMemo(() => validateRows(rows, existingSkus), [rows, existingSkus])
+  const results = useMemo(() => {
+    const updating = new Set(rows.filter((r) => r._update).map((r) => r.sku.trim()))
+    return validateRows(rows, new Set([...existingSkus].filter((k) => !updating.has(k))))
+  }, [rows, existingSkus])
 
   // A fix is "active" while the cell still holds the fixed value; "pending" until the user keeps it.
   const activeFixes = (row) => Object.entries(row._fixes || {}).filter(([k, f]) => row[k] === f.to)
@@ -288,7 +314,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
     const by = {}
     rows.forEach((r, i) => { const k = r.sku.trim(); if (k) (by[k] = by[k] || []).push(i) })
     return Object.entries(by)
-      .filter(([sku, idx]) => idx.length > 1 || existingSkus.has(sku))
+      .filter(([sku, idx]) => idx.length > 1 || (existingSkus.has(sku) && !idx.every((i) => rows[i]._update)))
       .map(([sku, idx]) => {
         const sig = (i) => JSON.stringify(clean(rows[i]))
         return { sku, idx, existing: existingSkus.has(sku), identical: idx.length > 1 && idx.every((i) => sig(i) === sig(idx[0])) }
@@ -328,7 +354,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
     setAi({ busy: true, msg: '' })
     try {
       const res = await fetch('/api/ai/suggest', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: aiTargets }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: aiTargets.slice(0, 200) }), // server also caps at 200
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'AI request failed')
@@ -345,7 +371,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
         return next
       })
       setTouched(new Set([...touched, ...aiTargets.map((t) => t.index)]))
-      setAi({ busy: false, msg: `AI suggested ${data.suggestions.length} fixes. They're marked 🤖 for you to Keep or Undo.${data.failedBatches ? ` (${data.failedBatches} batch(es) failed; try again.)` : ''}` })
+      setAi({ busy: false, msg: `AI suggested ${data.suggestions.length} fixes. They're marked 🤖 for you to Keep or Undo.${aiTargets.length > 200 ? ` It looked at the first 200 rows; ask again for the rest.` : ''}${data.failedBatches ? ` (${data.failedBatches} batch(es) failed; try again.)` : ''}` })
       void applied
     } catch (e) {
       setAi({ busy: false, msg: `AI couldn't help this time: ${e.message}` })
@@ -364,6 +390,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
     }
     return next
   }
+  const markUpdate = (i) => { setRows(rows.map((r, j) => (j === i ? { ...r, _update: true } : r))); touch(i) }
   const newSku = (i) => { setRows(reassign(rows, [i])); touch(i) }
   const keepSku = (g, keepIdx) => {
     setRows(reassign(rows, g.existing ? g.idx : g.idx.filter((i) => i !== keepIdx)))
@@ -386,7 +413,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
     setBusy(true)
     const readyRows = rows.filter((_, i) => status[i].ready)
     const res = await fetch('/api/import', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: readyRows.map(clean) }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: readyRows.map(clean), updates: readyRows.filter((r) => r._update).map((r) => r.sku.trim()) }),
     }).then((r) => r.json())
     const skipped = rows.map((r, i) => ({ r, i })).filter(({ i }) => !status[i].ready)
       .map(({ r, i }) => ({
@@ -397,6 +424,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
     onImported(res, { skipped })
   }
 
+  const multiFile = new Set(rows.map((r) => r._file)).size > 1
   const attentionIdx = rows.map((_, i) => i).filter((i) => !status[i].ready)
   const step = (dir) => {
     if (!attentionIdx.length) return setOpenRow(null)
@@ -416,6 +444,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
     const row = rows[i]
     const out = []
     const dupMsg = dupOf[i] && (dupOf[i].identical ? 'Identical to another row' : dupOf[i].existing ? 'SKU already in system' : `SKU shared with row ${dupOf[i].idx.filter((j) => j !== i).map((j) => j + 1).join(', ')}`)
+    if (row._update) out.push(['sky', 'Will update the existing item'])
     if (dupMsg) out.push(['orange', dupMsg])
     for (const [k, msg] of Object.entries(results[i].errors)) {
       if (k === 'sku' && dupMsg) continue
@@ -430,7 +459,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
   }
   const chipCls = {
     red: 'bg-red-50 text-red-700 ring-red-200', orange: 'bg-orange-50 text-orange-800 ring-orange-200',
-    violet: 'bg-violet-50 text-violet-700 ring-violet-200', amber: 'bg-amber-50 text-amber-800 ring-amber-200', emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    violet: 'bg-violet-50 text-violet-700 ring-violet-200', sky: 'bg-sky-50 text-sky-700 ring-sky-200', amber: 'bg-amber-50 text-amber-800 ring-amber-200', emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   }
 
   const needYou = status.filter((st) => st.errs > 0).length
@@ -495,7 +524,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
             <tbody>
               {visible.map((i) => {
                 const r = rows[i]
-                const sub = [sizeText(r.dimensions), vendorsText(r.vendors)].filter(Boolean).join(' · ')
+                const sub = [multiFile && r._file, sizeText(r.dimensions), vendorsText(r.vendors)].filter(Boolean).join(' · ')
                 return (
                   <tr key={i} onClick={() => setOpenRow(i)} className={`border-b border-slate-50 cursor-pointer hover:bg-slate-50 ${o === i ? 'bg-indigo-50/60' : ''}`}>
                     <td className="py-3 pl-5 pr-3 whitespace-nowrap">{badge(status[i])}<div className="text-[11px] text-slate-400 mt-0.5">Row {i + 1}</div></td>
@@ -544,6 +573,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
                 ? <button className="px-2.5 py-1 rounded-md bg-white border border-orange-300 text-xs font-medium" onClick={() => { remove(o); setOpenRow(null) }}>Remove this copy</button>
                 : <>
                     {!og.existing && <button className="px-2.5 py-1 rounded-md bg-white border border-orange-300 text-xs font-medium" onClick={() => keepSku(og, o)}>Keep SKU for this item</button>}
+                    {og.existing && og.idx.length === 1 && <button className="px-2.5 py-1 rounded-md bg-orange-600 text-white text-xs font-medium" onClick={() => markUpdate(o)}>Update the existing item</button>}
                     <button className="px-2.5 py-1 rounded-md bg-white border border-orange-300 text-xs font-medium" onClick={() => newSku(o)}>Give this item a new SKU</button>
                   </>}
             </div>
@@ -572,6 +602,11 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
     first_received_on: it.first_received_on ?? '', discontinued_on: it.discontinued_on ?? '',
     dimensions: it.dimensions ? JSON.stringify(it.dimensions) : '', vendors: it.vendors?.length ? JSON.stringify(it.vendors) : '',
   })
+  const clearAll = async () => {
+    if (!window.confirm(`Delete ALL ${items.length} imported items from the system? This can't be undone, and past imports can no longer be undone.`)) return
+    await fetch('/api/items', { method: 'DELETE' })
+    setSel(null); reload(); onChanged?.()
+  }
   const del = async (it) => {
     if (!window.confirm(`Delete ${it.sku} (${it.name}) from the system? This can't be undone.`)) return
     await fetch(`/api/items/${encodeURIComponent(it.sku)}`, { method: 'DELETE' })
@@ -601,6 +636,7 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
           </div>
           <input autoFocus placeholder="Search SKU or name…" value={q} onChange={(e) => setQ(e.target.value)}
             className="ml-auto w-72 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+          {items?.length > 0 && <button className="px-3 py-2 rounded-lg border border-red-200 text-red-600 text-sm hover:bg-red-50" onClick={clearAll}>Clear all</button>}
           <button className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800" onClick={onImportAnother}>Import another file</button>
         </div>
       </header>
@@ -722,9 +758,17 @@ function ItemDetail({ item: it, onClose, onEdit, onDelete }) {
 }
 
 function Results({ result, onRestart, onViewItems }) {
+  const [undone, setUndone] = useState(false)
+  const undo = async () => {
+    if (!window.confirm(`Undo this import? ${result.imported.length} items will be removed${result.updated ? ` and ${result.updated} updated items restored` : ''}.`)) return
+    const r = await fetch(`/api/import/${result.batch}/undo`, { method: 'POST' })
+    if (r.ok) setUndone(true)
+  }
   const skipped = result.sent.skipped
   const downloadSkipped = () => {
-    const csv = Papa.unparse(skipped.map((s) => ({ ...s.row, _errors: Object.entries(s.errors).map(([k, v]) => `${k}: ${v}`).join(' | ') })))
+    // Neutralize spreadsheet formulas (=, +, -, @) so opening the file in Excel can't run anything.
+    const safe = (v) => (typeof v === 'string' && /^[=+\-@\t\r]/.test(v) ? `'${v}` : v)
+    const csv = Papa.unparse(skipped.map((s) => Object.fromEntries(Object.entries({ ...s.row, _errors: Object.entries(s.errors).map(([k, v]) => `${k}: ${v}`).join(' | ') }).map(([k, v]) => [k, safe(v)]))))
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
     a.download = 'not_imported.csv'
@@ -734,7 +778,10 @@ function Results({ result, onRestart, onViewItems }) {
     <div className="space-y-6">
       <div className="space-y-2">
         <span className="label text-slate-500">Import complete</span>
-        <h2 className="text-4xl md:text-5xl font-medium tracking-[-0.03em]">{result.imported.length} items are in.</h2>
+        <h2 className="text-4xl md:text-5xl font-medium tracking-[-0.03em]">{undone ? 'Import undone.' : `${result.imported.length} items are in.`}</h2>
+        {!undone && result.updated > 0 && <p className="text-sky-700">{result.updated} of them updated existing items.</p>}
+        {undone ? <p className="text-slate-600">Everything from this import was removed{result.updated ? ' and the items it changed were restored' : ''}.</p>
+          : result.batch && result.imported.length > 0 && <button className="text-sm underline underline-offset-4 text-slate-600 hover:text-red-600" onClick={undo}>Undo this import</button>}
         <p className="text-slate-600">{skipped.length + result.rejected.length > 0 ? 'Here is exactly what got in, and what didn\'t and why.' : 'Everything in the file was imported.'}</p>
       </div>
       <div className="grid sm:grid-cols-2 gap-4 stagger">

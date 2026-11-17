@@ -2,6 +2,27 @@
 
 Newest entries at the top.
 
+## Hardening: security and data-safety review
+A review of crash, security and data-loss risks. Fixed the top 5:
+- **🔴 Data loss: the store is now written atomically** (temp file + rename), and a store file that exists but can't be parsed **raises an error instead of being treated as empty**. Why: before, one half-written file meant the next import silently wiped every item.
+- **🔴 The API listens on 127.0.0.1 only** (the Vite proxy points there too). Why: there's no auth, so anyone on the same network could read or delete items or spend the AI key.
+- **🟠 Upgraded SheetJS `xlsx` 0.18.5 → 0.20.3** (official SheetJS distribution; the npm copy is unmaintained). Why: 0.18.5 has a known high-severity prototype-pollution / ReDoS issue with crafted Excel files. `npm audit` is now clean.
+- **🟠 CSV formula injection blocked in "Download as CSV"**: cells starting with `= + - @` get a leading `'`. Why: a hostile cell like `=HYPERLINK(...)` would otherwise run when the admin opens the file in Excel.
+- **🟠 Undo can no longer create duplicate SKUs**: an old version is restored only if no current item uses that SKU. The undo route also only looks up real batch ids (`__proto__` now returns 404 instead of an error).
+- **Added "Clear all"** on the Imported items page (confirmed; also clears undo history so undo can't resurrect deleted items).
+
+- **"Ask AI" is capped at 200 rows per request** (client and server); the message says to ask again for the rest. Why: bounds cost and latency on huge files.
+- **Malformed rows in `/api/import` (e.g. `null`) are rejected with reasons instead of causing a 500.** Why: the server should never throw on bad input.
+
+## Excel, multiple files, update existing, undo import
+- **Excel (.xlsx/.xls) upload** via SheetJS (first sheet). Why: an admin "moving off spreadsheets" has Excel files, not CSVs.
+- **Multiple files at once**, reviewed as **one combined batch**; each row shows its source file, and duplicate SKUs are caught *across* files. Why: real imports come as several sheets, and cross-file duplicates are invisible by hand.
+- **"Update the existing item"** for SKUs already in the system (in the edit panel's duplicate box), shown as a blue "Will update the existing item" chip; the server only allows overwrites for SKUs explicitly listed in `updates`. Why: re-importing next month's counts is the long-term use; rejecting every known SKU would block it.
+- **Undo this import** on the Results page: every import is tagged with a batch id; the batch file stores the overwritten versions, so undo removes added items **and restores updated ones**. Tested end to end (update → undo restores name and qty, item count unchanged). Why: the ultimate "trust what got in" feature.
+
+## Final README
+- **README rewritten**: run steps (with the correct Node minimum for Vite 8), what the app does step by step, how it's built (files + API), what works and the known gaps, and how we worked with the agent. Why: it's the first thing reviewers read, and it sets up the pairing conversation.
+
 ## Imported items is now a full-screen page
 - **Imported items opens full screen (not a side panel)**, with ← Back, a search box, and **"Import another file" always visible in the header**. Clicking an item still opens the detail/edit panel on the right. Why: the list deserves the full width, and the next action stays in direct view.
 
