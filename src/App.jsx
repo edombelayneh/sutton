@@ -189,12 +189,16 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
 
   // A fix is "active" while the cell still holds the fixed value; "pending" until the user keeps it.
   const activeFixes = (row) => Object.entries(row._fixes || {}).filter(([k, f]) => row[k] === f.to)
-  const pendingFixes = (row) => activeFixes(row).filter(([, f]) => !f.confirmed)
+  const pendingAll = (row) => activeFixes(row).filter(([, f]) => !f.confirmed)
+  const pendingFixes = (row) => pendingAll(row).filter(([, f]) => !f.ai) // our deterministic fixes
+  const aiPending = (row) => pendingAll(row).filter(([, f]) => f.ai) // AI suggestions awaiting approval
   const status = rows.map((row, i) => {
     const errs = Object.keys(results[i].errors).length
     const checks = pendingFixes(row).filter(([, f]) => f.warn).length
-    return { errs, checks, ready: errs === 0 && checks === 0 }
+    const aiChecks = aiPending(row).length
+    return { errs, checks, aiChecks, ready: errs === 0 && checks === 0 && aiChecks === 0 }
   })
+  const aiTotal = rows.reduce((n, r) => n + aiPending(r).length, 0)
   const readyCount = status.filter((s) => s.ready).length
   const attentionCount = rows.length - readyCount
   const pendingTotal = rows.reduce((n, r) => n + pendingFixes(r).length, 0)
@@ -209,9 +213,9 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
     setRows(rows.map((r, j) => (j === i ? { ...r, _fixes: { ...r._fixes, [key]: { ...r._fixes[key], confirmed: true } } } : r)))
     touch(i)
   }
-  const keepAll = () => setRows(rows.map((r) => {
+  const keepAll = (ai = false) => setRows(rows.map((r) => {
     const f = { ...(r._fixes || {}) }
-    for (const [k] of activeFixes(r)) f[k] = { ...f[k], confirmed: true }
+    for (const [k, x] of activeFixes(r)) if (Boolean(x.ai) === ai) f[k] = { ...f[k], confirmed: true }
     return { ...r, _fixes: f }
   }))
   // Remove several rows at once, keeping the "touched" indices aligned.
@@ -242,15 +246,6 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
   }, [dupGroups])
   const dupItems = Object.keys(dupOf).length
 
-  const visibleRaw = rows.map((r, i) => i).filter((i) =>
-    filter === 'all' ? true
-      : filter === 'fixed' ? pendingFixes(rows[i]).length > 0
-      : filter === 'dups' ? dupOf[i] || touched.has(i)
-      : !status[i].ready || touched.has(i))
-  // In the Duplicates view, keep items that share a SKU next to each other.
-  const visible = filter === 'dups'
-    ? [...visibleRaw].sort((a, b) => (dupOf[a]?.idx[0] ?? a) - (dupOf[b]?.idx[0] ?? b) || a - b)
-    : visibleRaw
 
   // ---- AI: rows with problems other than duplicate SKUs (those have their own flow) ----
   const aiTargets = rows.map((r, i) => {
@@ -258,6 +253,20 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
     if (dupOf[i] && /Duplicate|already exists/.test(errors.sku || '')) delete errors.sku
     return { index: i, row: clean(r), errors }
   }).filter((t) => Object.keys(t.errors).length)
+
+  const aiTargetSet = new Set(aiTargets.map((t) => t.index))
+  const aiRows = rows.filter((r, i) => aiPending(r).length > 0 || aiTargetSet.has(i)).length
+
+  const visibleRaw = rows.map((r, i) => i).filter((i) =>
+    filter === 'all' ? true
+      : filter === 'fixed' ? pendingFixes(rows[i]).length > 0
+      : filter === 'dups' ? dupOf[i] || touched.has(i)
+      : filter === 'ai' ? aiPending(rows[i]).length > 0 || aiTargetSet.has(i) || touched.has(i)
+      : !status[i].ready || touched.has(i))
+  // In the Duplicates view, keep items that share a SKU next to each other.
+  const visible = filter === 'dups'
+    ? [...visibleRaw].sort((a, b) => (dupOf[a]?.idx[0] ?? a) - (dupOf[b]?.idx[0] ?? b) || a - b)
+    : visibleRaw
 
   const askAi = async () => {
     setAi({ busy: true, msg: '' })
@@ -344,6 +353,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
         <div className="ml-auto flex gap-2 text-sm">
           {tab('errors', `Needs attention (${attentionCount})`, showErrors)}
           {dupItems > 0 && tab('dups', `Duplicates (${dupItems})`)}
+          {aiRows > 0 && tab('ai', `🤖 AI (${aiRows})`)}
           {tab('fixed', `Auto-fixed (${pendingRows})`)}
           {tab('all', 'All rows')}
         </div>
@@ -361,20 +371,28 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
           </div>
         </div>
       )}
-      {aiTargets.length > 0 && (
+      {(aiTargets.length > 0 || aiTotal > 0) && (
         <div className="bg-violet-50 border-2 border-violet-300 rounded-lg px-4 py-3 flex items-center gap-4 flex-wrap">
           <div>
-            <div className="font-semibold text-violet-900">🤖 {aiTargets.length} row{aiTargets.length > 1 ? 's still have' : ' still has'} problems we can't fix safely on our own</div>
+            <div className="font-semibold text-violet-900">🤖 {aiTotal > 0
+              ? `${aiTotal} AI suggestion${aiTotal > 1 ? 's' : ''} waiting for your approval`
+              : `${aiTargets.length} row${aiTargets.length > 1 ? 's still have' : ' still has'} problems we can't fix safely on our own`}</div>
             <div className="text-sm text-violet-900">
               {ai.msg || (aiOn
                 ? 'AI can suggest values from the rest of the row (e.g. a category from the name, a cost from the preferred vendor). You approve each one.'
                 : 'AI is off. Add OPENROUTER_API_KEY to .env and restart to get suggestions. You can still fix these by hand.')}
             </div>
           </div>
-          <button disabled={!aiOn || ai.busy} onClick={askAi}
-            className="ml-auto px-3 py-2 rounded bg-violet-600 text-white text-sm font-medium disabled:opacity-50">
-            {ai.busy ? `AI is reviewing ${aiTargets.length} rows…` : `🤖 Suggest fixes for ${aiTargets.length} rows`}
-          </button>
+          <div className="ml-auto flex gap-2">
+            <button className="px-3 py-2 rounded border border-violet-400 bg-white text-violet-900 text-sm" onClick={() => setFilter('ai')}>Review {aiTotal > 0 ? 'AI suggestions' : 'these rows'}</button>
+            {aiTargets.length > 0 && (
+              <button disabled={!aiOn || ai.busy} onClick={askAi}
+                className={`px-3 py-2 rounded text-sm font-medium disabled:opacity-50 ${aiTotal > 0 ? 'border border-violet-400 bg-white text-violet-900' : 'bg-violet-600 text-white'}`}>
+                {ai.busy ? `AI is reviewing ${aiTargets.length} rows…` : `🤖 Suggest fixes for ${aiTargets.length} rows`}
+              </button>
+            )}
+            {aiTotal > 0 && <button className="px-3 py-2 rounded bg-violet-600 text-white text-sm font-medium" onClick={() => keepAll(true)}>✓ Accept all {aiTotal}</button>}
+          </div>
         </div>
       )}
       {pendingTotal > 0 && (
@@ -386,7 +404,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
           </div>
           <div className="ml-auto flex gap-2">
             <button className="px-3 py-2 rounded border border-emerald-400 bg-white text-emerald-800 text-sm" onClick={() => setFilter('fixed')}>Review fixes</button>
-            <button className="px-3 py-2 rounded bg-emerald-600 text-white text-sm font-medium" onClick={keepAll}>✓ Confirm all {pendingTotal} fixes</button>
+            <button className="px-3 py-2 rounded bg-emerald-600 text-white text-sm font-medium" onClick={() => keepAll(false)}>✓ Confirm all {pendingTotal} fixes</button>
           </div>
         </div>
       )}
@@ -403,8 +421,11 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
                   <td className="p-2 text-slate-400">{i + 1}</td>
                   <td className="p-2 whitespace-nowrap">
                     {st.errs > 0 ? <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">● Needs you: {st.errs} field{st.errs > 1 ? 's' : ''}</span>
+                      : st.aiChecks > 0 ? <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 font-medium">● Check {st.aiChecks} AI suggestion{st.aiChecks > 1 ? 's' : ''}</span>
                       : st.checks > 0 ? <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">● Check {st.checks} fix{st.checks > 1 ? 'es' : ''}</span>
                       : <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">● Ready</span>}
+                    {st.errs > 0 && st.aiChecks > 0 && <div className="mt-1 text-violet-700">🤖 {st.aiChecks} AI suggestion{st.aiChecks > 1 ? 's' : ''} to check</div>}
+                    {st.aiChecks === 0 && aiTargetSet.has(i) && <div className="mt-1 text-violet-700">🤖 AI can suggest a fix</div>}
                     {dupOf[i] && (() => {
                       const g = dupOf[i]
                       const others = g.idx.filter((j) => j !== i).map((j) => j + 1)
@@ -429,14 +450,14 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
                     const err = results[i].errors[k]
                     const fix = rows[i]._fixes?.[k]
                     const fixed = fix && !fix.confirmed && rows[i][k] === fix.to
-                    const tone = fixed ? (fix.warn ? 'border-amber-400 bg-amber-50' : 'border-emerald-400 bg-emerald-50')
+                    const tone = fixed ? (fix.ai ? 'border-violet-400 bg-violet-50' : fix.warn ? 'border-amber-400 bg-amber-50' : 'border-emerald-400 bg-emerald-50')
                       : err ? 'border-red-400 bg-red-50' : 'border-transparent hover:border-slate-200'
                     return (
                       <td key={k} className="p-1">
                         <input title={err || (fixed ? `Was "${fix.from}": ${fix.why}` : '')} value={rows[i][k]} onChange={(e) => edit(i, k, e.target.value)}
                           className={`w-36 px-2 py-1 rounded border font-mono ${tone}`} />
                         {fixed && (
-                          <div className={`w-36 mt-1 p-1.5 rounded leading-tight ${fix.warn ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
+                          <div className={`w-36 mt-1 p-1.5 rounded leading-tight ${fix.ai ? 'bg-violet-100 text-violet-900' : fix.warn ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
                             <div className="font-semibold">{fix.ai ? '🤖 AI suggestion' : fix.warn ? '⚠ Please check' : '✨ Fixed'}</div>
                             <div>was <span className="font-mono line-through">{fix.from.trim() === '' ? '(spaces)' : fix.from}</span></div>
                             <div className="opacity-75">{fix.why}</div>

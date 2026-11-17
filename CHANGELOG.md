@@ -2,6 +2,12 @@
 
 Newest entries at the top.
 
+## UX: AI is purple everywhere + its own filter
+- **One color per source of change: purple = AI, green = our safe fixes, amber = our guesses, orange = duplicates, red = needs you.** AI-suggested cells, their cards and the row status ("● Check N AI suggestions") are now purple to match the purple AI banner. Why: in hand-testing, a purple banner with amber rows didn't connect.
+- **Rows the AI could help with show "🤖 AI can suggest a fix"** under their red status. Why: links each row back to the purple banner before AI runs.
+- **New "🤖 AI (N)" filter tab** (like Duplicates / Auto-fixed) plus "Review AI suggestions" and "✓ Accept all N" in the purple banner. Why: AI suggestions get the same review-in-bulk flow as everything else.
+- **AI suggestions are counted and confirmed separately from our deterministic fixes** (the green "Confirm all" no longer accepts AI suggestions). Why: approving our safe fixes shouldn't silently approve the AI's guesses too.
+
 ## Phase 2d: AI header-mapping fallback
 - **`POST /api/ai/map`: only headers our alias matching couldn't place are sent to the AI, with up to 3 sample values each, plus the list of still-unused fields.** Why: headers like `Part #`, `Grp` or `Std Cost` are obvious to a human but not to a fixed alias list; sample values let the AI tell e.g. a date column from a cost column.
 - **Runs automatically when the Map step opens; AI picks show "🤖 AI matched this: <why>" under the dropdown**, and columns the AI rejects show "AI: not an item field". Why: zero extra clicks, but the admin can see and override every choice.
