@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Papa from 'papaparse'
 import { FIELDS, FIELD_KEYS, autoMapHeaders, applyMapping, validateRows } from '../shared/schema.js'
 import { autoFixRow, generateSku } from '../shared/autofix.js'
+import { EditPanel, CAT_LABEL, FIELD_LABEL, money, count, sizeText, vendorsText } from './review-ui.jsx'
 
 // Rows carry their auto-fix log in `_fixes`; strip it before sending/exporting.
 const clean = ({ _fixes, ...r }) => r
@@ -72,7 +73,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen text-slate-900">
-      <header className="sticky top-0 z-30 bg-slate-950 text-white">
+      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-slate-200 text-slate-900">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center gap-8">
           <div className="flex items-center gap-2.5 shrink-0">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -84,18 +85,18 @@ export default function App() {
           <ol className="hidden md:flex items-center gap-1 text-sm ml-auto">
             {STEPS.map((s, i) => (
               <li key={s} className="flex items-center gap-1">
-                {i > 0 && <span className={`w-6 h-px ${i <= step ? 'bg-white/60' : 'bg-white/15'}`} />}
-                <span className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-colors ${i === step ? 'bg-white text-slate-950' : i < step ? 'text-white/80' : 'text-white/35'}`}>
+                {i > 0 && <span className={`w-6 h-px ${i <= step ? 'bg-slate-400' : 'bg-slate-200'}`} />}
+                <span className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-colors ${i === step ? 'bg-slate-900 text-white' : i < step ? 'text-slate-600' : 'text-slate-400'}`}>
                   <span className="font-mono text-[11px]">{i < step ? '✓' : String(i + 1).padStart(2, '0')}</span>{s}
                 </span>
               </li>
             ))}
           </ol>
-          <span className="md:hidden ml-auto label text-white/60">{String(step + 1).padStart(2, '0')} / {String(STEPS.length).padStart(2, '0')}</span>
+          <span className="md:hidden ml-auto label text-slate-500">{String(step + 1).padStart(2, '0')} / {String(STEPS.length).padStart(2, '0')}</span>
         </div>
-        <div className="h-0.5 bg-white/10"><div className="h-full bg-gradient-to-r from-sky-400 via-violet-400 to-emerald-400 seg" style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} /></div>
+        <div className="h-0.5 bg-slate-100"><div className="h-full bg-gradient-to-r from-sky-400 via-violet-400 to-emerald-400 seg" style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} /></div>
       </header>
-      <main key={step} className="max-w-7xl mx-auto px-6 py-10 animate-rise">
+      <main key={step} className="max-w-6xl mx-auto px-6 py-8 animate-rise">
         {step === 0 && <Upload onText={loadText} existingCount={existingSkus.size} />}
         {step === 1 && (
           <MapColumns aiMap={aiMap} fileName={fileName} headers={headers} sample={csvRows[0]} mapping={mapping}
@@ -222,6 +223,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
   // Rows the user has edited stay visible in "Needs attention" until they re-click the filter,
   // so a row doesn't vanish mid-typing the moment it becomes valid.
   const [touched, setTouched] = useState(new Set())
+  const [openRow, setOpenRow] = useState(null)
   const [aiOn, setAiOn] = useState(false)
   const [ai, setAi] = useState({ busy: false, msg: '' })
   useEffect(() => { fetch('/api/health').then((r) => r.json()).then((h) => setAiOn(h.ai)).catch(() => {}) }, [])
@@ -381,165 +383,159 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
     onImported(res, { skipped })
   }
 
-  const tab = (key, label, onClick) => (
-    <button className={`px-3.5 py-1.5 rounded-full transition-colors ${filter === key ? 'bg-slate-950 text-white' : 'border border-slate-200 bg-white hover:border-slate-400'}`} onClick={onClick || (() => setFilter(key))}>{label}</button>
-  )
+  const attentionIdx = rows.map((_, i) => i).filter((i) => !status[i].ready)
+  const step = (dir) => {
+    if (!attentionIdx.length) return setOpenRow(null)
+    const cur = openRow ?? -1
+    const next = dir > 0 ? attentionIdx.find((i) => i > cur) ?? attentionIdx[0] : [...attentionIdx].reverse().find((i) => i < cur) ?? attentionIdx.at(-1)
+    setOpenRow(next)
+  }
+
+  const badge = (st) =>
+    st.errs > 0 ? <span className="inline-flex items-center gap-1.5 text-xs font-medium text-red-700"><i className="w-2 h-2 rounded-full bg-red-500" />Needs you</span>
+      : st.aiChecks > 0 ? <span className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-700"><i className="w-2 h-2 rounded-full bg-violet-500" />Check AI</span>
+      : st.checks > 0 ? <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700"><i className="w-2 h-2 rounded-full bg-amber-500" />Check fix</span>
+      : <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700"><i className="w-2 h-2 rounded-full bg-emerald-500" />Ready</span>
+
+  // Plain-English chips describing what's going on in a row.
+  const notes = (i) => {
+    const row = rows[i]
+    const out = []
+    const dupMsg = dupOf[i] && (dupOf[i].identical ? 'Identical to another row' : dupOf[i].existing ? 'SKU already in system' : `SKU shared with row ${dupOf[i].idx.filter((j) => j !== i).map((j) => j + 1).join(', ')}`)
+    if (dupMsg) out.push(['orange', dupMsg])
+    for (const [k, msg] of Object.entries(results[i].errors)) {
+      if (k === 'sku' && dupMsg) continue
+      out.push(['red', `${FIELD_LABEL[k]}: ${msg}`])
+    }
+    const ai = aiPending(row).length
+    if (ai) out.push(['violet', `${ai} AI suggestion${ai > 1 ? 's' : ''}`])
+    const fx = pendingFixes(row)
+    if (fx.length) out.push([fx.some(([, f]) => f.warn) ? 'amber' : 'emerald', `${fx.length} auto-fix${fx.length > 1 ? 'es' : ''}`])
+    if (!out.length && aiTargetSet.has(i)) out.push(['violet', 'AI can help'])
+    return out
+  }
+  const chipCls = {
+    red: 'bg-red-50 text-red-700 ring-red-200', orange: 'bg-orange-50 text-orange-800 ring-orange-200',
+    violet: 'bg-violet-50 text-violet-700 ring-violet-200', amber: 'bg-amber-50 text-amber-800 ring-amber-200', emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  }
+
+  const needYou = status.filter((st) => st.errs > 0).length
+  const chips = [
+    ['errors', 'red', `${attentionCount} need attention`, attentionCount, showErrors],
+    ['dups', 'orange', `${dupItems} duplicate SKUs`, dupItems],
+    ['ai', 'violet', `${aiRows} AI can help`, aiRows],
+    ['fixed', 'emerald', `${pendingRows} auto-fixed`, pendingRows],
+    ['all', 'slate', `All ${rows.length}`, 1],
+  ]
+  const dot = { red: 'bg-red-500', orange: 'bg-orange-500', violet: 'bg-violet-500', emerald: 'bg-emerald-500', slate: 'bg-slate-400' }
+
+  const o = openRow !== null && rows[openRow] ? openRow : null
+  const og = o !== null ? dupOf[o] : null
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-end gap-6 flex-wrap">
-        <div className="space-y-3 min-w-[280px] flex-1 max-w-xl">
-          <div className="flex items-baseline gap-3">
-            <span className="text-4xl font-medium tracking-tight tabular-nums">{readyCount}<span className="text-slate-400">/{rows.length}</span></span>
-            <span className="text-slate-600">rows ready to import</span>
-          </div>
-          <div className="flex h-2 rounded-full overflow-hidden bg-slate-200" role="img" aria-label={`${readyCount} ready, ${attentionCount} need attention`}>
-            <div className="seg bg-emerald-500" style={{ width: `${(readyCount / Math.max(rows.length, 1)) * 100}%` }} />
-            <div className="seg bg-red-400" style={{ width: `${(attentionCount / Math.max(rows.length, 1)) * 100}%` }} />
-          </div>
-          <div className="flex gap-4 text-xs text-slate-500">
-            <span className="flex items-center gap-1.5"><i className="w-2 h-2 rounded-full bg-emerald-500" />{readyCount} ready</span>
-            <span className="flex items-center gap-1.5"><i className="w-2 h-2 rounded-full bg-red-400" />{attentionCount} need attention</span>
-          </div>
-        </div>
-        <div className="ml-auto flex gap-2 text-sm">
-          {tab('errors', `Needs attention (${attentionCount})`, showErrors)}
-          {dupItems > 0 && tab('dups', `Duplicates (${dupItems})`)}
-          {aiRows > 0 && tab('ai', `🤖 AI (${aiRows})`)}
-          {tab('fixed', `Auto-fixed (${pendingRows})`)}
-          {tab('all', 'All rows')}
-        </div>
-      </div>
-      {dupGroups.length > 0 && (
-        <div className="bg-orange-50 border-2 border-orange-400 rounded-xl px-4 py-2.5 flex items-center gap-x-4 gap-y-2 flex-wrap">
-          <div>
-            <div className="font-semibold text-orange-900">⚠ {dupGroups.length} SKU{dupGroups.length > 1 ? 's are' : ' is'} shared by {dupItems} items</div>
-            <div className="text-sm text-orange-900">A SKU must be unique{dupGroups.some((g) => g.existing) ? ' (some already exist in the system)' : ''}. These rows can't import until each one is resolved.</div>
-          </div>
-          <div className="ml-auto flex gap-2">
-            <button className="px-3 py-2 rounded border border-orange-400 bg-white text-orange-900 text-sm" onClick={() => setFilter('dups')}>Review duplicates</button>
-            <button className="px-3 py-2 rounded bg-orange-600 text-white text-sm font-medium" onClick={resolveAll}
-              title="Identical copies are removed. Otherwise the first item keeps the SKU and the others get new SKUs for you to confirm.">✨ Resolve all</button>
-          </div>
-        </div>
-      )}
-      {(aiTargets.length > 0 || aiTotal > 0) && (
-        <div className="bg-violet-50 border-2 border-violet-300 rounded-xl px-4 py-2.5 flex items-center gap-x-4 gap-y-2 flex-wrap">
-          <div>
-            <div className="font-semibold text-violet-900">🤖 {aiTotal > 0
-              ? `${aiTotal} AI suggestion${aiTotal > 1 ? 's' : ''} waiting for your approval`
-              : `${aiTargets.length} row${aiTargets.length > 1 ? 's still have' : ' still has'} problems we can't fix safely on our own`}</div>
-            <div className="text-sm text-violet-900">
-              {ai.msg || (aiOn
-                ? 'AI can suggest values from the rest of the row (e.g. a category from the name, a cost from the preferred vendor). You approve each one.'
-                : 'AI is off. Add OPENROUTER_API_KEY to .env and restart to get suggestions. You can still fix these by hand.')}
+    <div className="space-y-5">
+      {/* Progress + summary */}
+      <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-4">
+        <div className="flex items-end gap-6 flex-wrap">
+          <div className="flex-1 min-w-[260px] space-y-2">
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-semibold tracking-tight tabular-nums">{readyCount}</span>
+              <span className="text-slate-500">of {rows.length} rows ready to import</span>
+            </div>
+            <div className="flex h-1.5 rounded-full overflow-hidden bg-slate-100">
+              <div className="seg bg-emerald-500" style={{ width: `${(readyCount / Math.max(rows.length, 1)) * 100}%` }} />
             </div>
           </div>
-          <div className="ml-auto flex gap-2">
-            <button className="px-3 py-2 rounded border border-violet-400 bg-white text-violet-900 text-sm" onClick={() => setFilter('ai')}>Review {aiTotal > 0 ? 'AI suggestions' : 'these rows'}</button>
-            {aiTargets.length > 0 && (
-              <button disabled={!aiOn || ai.busy} onClick={askAi}
-                className={`px-3 py-2 rounded text-sm font-medium disabled:opacity-50 ${aiTotal > 0 ? 'border border-violet-400 bg-white text-violet-900' : 'bg-violet-600 text-white'}`}>
-                {ai.busy ? `AI is reviewing ${aiTargets.length} rows…` : `🤖 Suggest fixes for ${aiTargets.length} rows`}
-              </button>
-            )}
-            {aiTotal > 0 && <button className="px-3 py-2 rounded bg-violet-600 text-white text-sm font-medium" onClick={() => keepAll(true)}>✓ Accept all {aiTotal}</button>}
+          <div className="flex flex-wrap gap-2">
+            {dupItems > 0 && <button className="px-3 py-2 rounded-lg text-sm font-medium bg-orange-50 text-orange-800 hover:bg-orange-100" onClick={resolveAll}>Resolve {dupGroups.length} duplicate SKUs</button>}
+            {aiTargets.length > 0 && aiOn && <button disabled={ai.busy} className="px-3 py-2 rounded-lg text-sm font-medium bg-violet-50 text-violet-800 hover:bg-violet-100 disabled:opacity-60" onClick={askAi}>{ai.busy ? 'AI is reviewing…' : `Ask AI to fix ${aiTargets.length} rows`}</button>}
+            {aiTotal > 0 && <button className="px-3 py-2 rounded-lg text-sm font-medium bg-violet-600 text-white hover:bg-violet-700" onClick={() => keepAll(true)}>Accept {aiTotal} AI suggestions</button>}
+            {pendingTotal > 0 && <button className="px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => keepAll(false)}>Confirm {pendingTotal} auto-fixes</button>}
           </div>
         </div>
-      )}
-      {pendingTotal > 0 && (
-        <div className="bg-emerald-50 border-2 border-emerald-300 rounded-xl px-4 py-2.5 flex items-center gap-x-4 gap-y-2 flex-wrap">
-          <div>
-            <div className="font-semibold text-emerald-800">✨ We fixed {pendingTotal} values in {pendingRows} rows for you</div>
-            <div className="text-sm text-emerald-900">Spacing, casing, $ signs, number and date formats, yes/no values.
-              {checkTotal > 0 && <> <b className="text-amber-700">{checkTotal} {checkTotal === 1 ? 'is a guess' : 'are guesses'} you need to confirm</b> before {checkTotal === 1 ? 'it imports' : 'they import'}.</>}</div>
-          </div>
-          <div className="ml-auto flex gap-2">
-            <button className="px-3 py-2 rounded border border-emerald-400 bg-white text-emerald-800 text-sm" onClick={() => setFilter('fixed')}>Review fixes</button>
-            <button className="px-3 py-2 rounded bg-emerald-600 text-white text-sm font-medium" onClick={() => keepAll(false)}>✓ Confirm all {pendingTotal} fixes</button>
-          </div>
+        {(ai.msg || (!aiOn && aiTargets.length > 0)) && (
+          <p className="text-xs text-violet-700">{ai.msg || 'AI suggestions are off (add OPENROUTER_API_KEY to .env). You can still fix rows by hand.'}</p>
+        )}
+        {checkTotal > 0 && <p className="text-xs text-amber-700">{checkTotal} of our fixes were guesses (e.g. ambiguous dates). Confirm them before they import.</p>}
+        <div className="flex flex-wrap gap-1.5 border-t border-slate-100 pt-4">
+          {chips.filter(([, , , n]) => n > 0).map(([key, color, label, , onClick]) => (
+            <button key={key} onClick={onClick || (() => setFilter(key))}
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors ${filter === key ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
+              <i className={`w-1.5 h-1.5 rounded-full ${dot[color]}`} />{label}
+            </button>
+          ))}
         </div>
-      )}
-      <div className="overflow-auto max-h-[65vh] bg-white rounded-2xl border border-slate-200 shadow-sm">
-        <table className="text-xs">
-          <thead className="sticky top-0 bg-slate-100 text-left z-10">
-            <tr><th className="p-2">Row</th><th className="p-2">Status</th>{FIELDS.map((f) => <th key={f.key} className="p-2 whitespace-nowrap">{f.label}{f.required ? ' *' : ''}</th>)}<th /></tr>
-          </thead>
-          <tbody>
-            {visible.map((i) => {
-              const st = status[i]
-              return (
-                <tr key={i} className={`border-t align-top ${st.ready && touched.has(i) ? 'bg-green-50/60' : ''}`}>
-                  <td className="p-2 text-slate-400">{i + 1}</td>
-                  <td className="p-2 whitespace-nowrap">
-                    {st.errs > 0 ? <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">● Needs you: {st.errs} field{st.errs > 1 ? 's' : ''}</span>
-                      : st.aiChecks > 0 ? <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 font-medium">● Check {st.aiChecks} AI suggestion{st.aiChecks > 1 ? 's' : ''}</span>
-                      : st.checks > 0 ? <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">● Check {st.checks} fix{st.checks > 1 ? 'es' : ''}</span>
-                      : <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">● Ready</span>}
-                    {st.errs > 0 && st.aiChecks > 0 && <div className="mt-1 text-violet-700">🤖 {st.aiChecks} AI suggestion{st.aiChecks > 1 ? 's' : ''} to check</div>}
-                    {st.aiChecks === 0 && aiTargetSet.has(i) && <div className="mt-1 text-violet-700">🤖 AI can suggest a fix</div>}
-                    {dupOf[i] && (() => {
-                      const g = dupOf[i]
-                      const others = g.idx.filter((j) => j !== i).map((j) => j + 1)
-                      return (
-                        <div className="mt-1.5 p-1.5 rounded bg-orange-100 text-orange-900 w-44 whitespace-normal leading-tight">
-                          <div className="font-semibold">⚠ Duplicate SKU</div>
-                          <div>{g.identical ? `Identical to row ${others.join(', ')}` : others.length ? `Shared with row ${others.join(', ')}` : 'Already in the system'}</div>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {g.identical && i !== g.idx[0]
-                              ? <button className="px-1.5 rounded bg-white border font-medium" onClick={() => remove(i)}>Remove copy</button>
-                              : <>
-                                  {!g.existing && <button className="px-1.5 rounded bg-white border" title="This item keeps the SKU; the others get new ones" onClick={() => keepSku(g, i)}>Keep SKU</button>}
-                                  <button className="px-1.5 rounded bg-white border" title="Generate a new unique SKU for this item" onClick={() => newSku(i)}>✨ New SKU</button>
-                                  <button className="px-1.5 rounded bg-white border text-slate-500" title="Leave this row out of the import" onClick={() => remove(i)}>Skip</button>
-                                </>}
-                          </div>
-                        </div>
-                      )
-                    })()}
-                  </td>
-                  {FIELD_KEYS.map((k) => {
-                    const err = results[i].errors[k]
-                    const fix = rows[i]._fixes?.[k]
-                    const fixed = fix && !fix.confirmed && rows[i][k] === fix.to
-                    const tone = fixed ? (fix.ai ? 'border-violet-400 bg-violet-50' : fix.warn ? 'border-amber-400 bg-amber-50' : 'border-emerald-400 bg-emerald-50')
-                      : err ? 'border-red-400 bg-red-50' : 'border-transparent hover:border-slate-200'
-                    return (
-                      <td key={k} className="p-1">
-                        <input title={err || (fixed ? `Was "${fix.from}": ${fix.why}` : '')} value={rows[i][k]} onChange={(e) => edit(i, k, e.target.value)}
-                          className={`w-36 px-2 py-1 rounded border font-mono ${tone}`} />
-                        {fixed && (
-                          <div className={`w-36 mt-1 p-1.5 rounded leading-tight ${fix.ai ? 'bg-violet-100 text-violet-900' : fix.warn ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
-                            <div className="font-semibold">{fix.ai ? '🤖 AI suggestion' : fix.warn ? '⚠ Please check' : '✨ Fixed'}</div>
-                            <div>was <span className="font-mono line-through">{fix.from.trim() === '' ? '(spaces)' : fix.from}</span></div>
-                            <div className="opacity-75">{fix.why}</div>
-                            <div className="flex gap-1 mt-1">
-                              <button className="px-1.5 rounded bg-white border font-medium" onClick={() => keepFix(i, k)}>✓ Keep</button>
-                              <button className="px-1.5 rounded bg-white border" onClick={() => undoFix(i, k)}>↶ Undo</button>
-                            </div>
-                          </div>
-                        )}
-                        {err && (fixed
-                          ? <div className="text-orange-700 w-36 mt-1 leading-tight">Still needs you: {err}</div>
-                          : <div className="text-red-600 w-36 mt-0.5 leading-tight">{err}</div>)}
-                      </td>
-                    )
-                  })}
-                  <td className="p-2"><button className="text-slate-400 hover:text-red-600" title="Skip this row" onClick={() => remove(i)}>✕</button></td>
-                </tr>
-              )
-            })}
-            {visible.length === 0 && <tr><td className="p-6 text-slate-500" colSpan={FIELDS.length + 3}>Nothing here. 🎉</td></tr>}
-          </tbody>
-        </table>
       </div>
+
+      {/* Readable list */}
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="overflow-auto max-h-[60vh]">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-white z-10 text-left text-xs text-slate-400 border-b border-slate-100">
+              <tr>
+                <th className="py-3 pl-5 pr-3 font-medium">Status</th><th className="px-3 font-medium">SKU</th><th className="px-3 font-medium">Item</th>
+                <th className="px-3 font-medium">Category</th><th className="px-3 font-medium text-right">Cost</th><th className="px-3 font-medium text-right">In stock</th>
+                <th className="px-3 font-medium">What's going on</th><th />
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((i) => {
+                const r = rows[i]
+                const sub = [sizeText(r.dimensions), vendorsText(r.vendors)].filter(Boolean).join(' · ')
+                return (
+                  <tr key={i} onClick={() => setOpenRow(i)} className={`border-b border-slate-50 cursor-pointer hover:bg-slate-50 ${o === i ? 'bg-indigo-50/60' : ''}`}>
+                    <td className="py-3 pl-5 pr-3 whitespace-nowrap">{badge(status[i])}<div className="text-[11px] text-slate-400 mt-0.5">Row {i + 1}</div></td>
+                    <td className="px-3 font-mono text-xs whitespace-nowrap">{r.sku || <span className="text-red-500">missing</span>}</td>
+                    <td className="px-3 max-w-[260px]">
+                      <div className="font-medium truncate">{r.name || <span className="text-red-500">No name</span>}</div>
+                      {sub && <div className="text-xs text-slate-400 truncate">{sub}</div>}
+                    </td>
+                    <td className="px-3 whitespace-nowrap">{CAT_LABEL[r.category] || <span className="text-red-500">{r.category || 'missing'}</span>}</td>
+                    <td className="px-3 text-right tabular-nums whitespace-nowrap">{money(r.unit_cost)}</td>
+                    <td className="px-3 text-right tabular-nums whitespace-nowrap">{count(r.quantity_on_hand)}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1 max-w-md">
+                        {notes(i).slice(0, 3).map(([c, t], n) => <span key={n} className={`px-2 py-0.5 rounded-md text-xs ring-1 ring-inset ${chipCls[c]}`}>{t}</span>)}
+                        {notes(i).length > 3 && <span className="text-xs text-slate-400">+{notes(i).length - 3} more</span>}
+                      </div>
+                    </td>
+                    <td className="pr-5 text-slate-300 text-right">›</td>
+                  </tr>
+                )
+              })}
+              {visible.length === 0 && <tr><td className="p-10 text-center text-slate-500" colSpan={8}>Nothing here. 🎉</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="flex gap-3 items-center">
-        <button className="px-5 py-2.5 rounded-full border border-slate-300 bg-white hover:border-slate-500 transition-colors" onClick={onBack}>Back</button>
-        <button disabled={!readyCount || busy} className="px-5 py-2.5 rounded-full bg-slate-950 text-white font-medium hover:bg-slate-800 transition-colors shadow-sm disabled:opacity-50" onClick={doImport}>
-          {busy ? 'Importing…' : `Import ${readyCount} item${readyCount === 1 ? '' : 's'}`}
+        <button className="px-4 py-2.5 rounded-lg border border-slate-200 bg-white text-sm hover:bg-slate-50" onClick={onBack}>Back</button>
+        <button disabled={!readyCount || busy} className="px-5 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-50" onClick={doImport}>
+          {busy ? 'Importing…' : `Import ${readyCount} ready item${readyCount === 1 ? '' : 's'}`}
         </button>
-        {attentionCount > 0 && <span className="text-sm text-slate-600">{attentionCount} rows will be held back. You can fix them now, or import the ready ones and download the rest afterwards.</span>}
+        {attentionCount > 0 && <span className="text-sm text-slate-500">{attentionCount} rows will be held back. Click any row to fix it{needYou ? '' : ''}.</span>}
       </div>
+
+      {o !== null && (
+        <EditPanel
+          i={o} row={rows[o]} errors={results[o].errors} statusBadge={badge(status[o])}
+          onEdit={(k, v) => edit(o, k, v)} onKeep={(k) => keepFix(o, k)} onUndo={(k) => undoFix(o, k)}
+          onClose={() => setOpenRow(null)} onPrev={() => step(-1)} onNext={() => step(1)}
+          onSkip={() => { remove(o); setOpenRow(null) }}
+          dup={og && (og.identical ? 'This row is identical to another row.' : og.existing ? `SKU ${og.sku} already exists in the system.` : `SKU ${og.sku} is also used by row ${og.idx.filter((j) => j !== o).map((j) => j + 1).join(', ')} (${og.idx.filter((j) => j !== o).map((j) => rows[j].name).join(', ')}).`)}
+          dupActions={og && (
+            <div className="flex gap-2 mt-2">
+              {og.identical && o !== og.idx[0]
+                ? <button className="px-2.5 py-1 rounded-md bg-white border border-orange-300 text-xs font-medium" onClick={() => { remove(o); setOpenRow(null) }}>Remove this copy</button>
+                : <>
+                    {!og.existing && <button className="px-2.5 py-1 rounded-md bg-white border border-orange-300 text-xs font-medium" onClick={() => keepSku(og, o)}>Keep SKU for this item</button>}
+                    <button className="px-2.5 py-1 rounded-md bg-white border border-orange-300 text-xs font-medium" onClick={() => newSku(o)}>Give this item a new SKU</button>
+                  </>}
+            </div>
+          )}
+        />
+      )}
     </div>
   )
 }

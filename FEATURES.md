@@ -18,6 +18,9 @@ Each feature, why it helps the user, and its status.
 | 9d | Row status column (Ready / Check fixes / Needs you) + Keep/Undo + "Confirm all" | Every row says exactly what to do next; one click accepts all our fixes | Done |
 | 9c | Ambiguous dates flagged amber "please double-check" | We never hide an assumption that could be wrong | Done |
 | 9e | Duplicate SKU banner + "Duplicates" filter: Keep / ✨ New SKU / Skip inline, remove identical copies, Resolve all | They know duplicates exist and fix them without losing a real product, and it scales to any file size | Done |
+| 13 | Readable list: words not codes, $ and thousands formatting, plain-English "What's going on" chips | The admin understands every row at a glance, without knowing the schema | Done |
+| 14 | Slide-in edit panel with grouped fields, Next issue / ↑↓ navigation | Fix rows one at a time with full context, fast | Done |
+| 15 | No JSON on screen: size as L×W×H + unit, vendors as an editable list with ★ preferred; recovers truncated vendor data | Non-technical users can edit complex fields safely | Done |
 | 11 | Live import-health bar + "N/200 ready" counter | Instantly shows how close they are to done | Done |
 | 12 | Guided upload page (Map / Fix / Trust explainer, sample files) | They know what will happen before uploading | Done |
 | 10b | Color-coded sources (purple AI, green fixed, amber guess, orange duplicate, red needs you) + "🤖 AI" filter + Accept all | The admin can tell at a glance who changed what, and review AI work in bulk | Done |

@@ -2,6 +2,15 @@
 
 Newest entries at the top.
 
+## Redesign: readable list + edit panel, no JSON on screen
+- **Feedback: the previous look was disliked, and the table was still a spreadsheet** (15 raw columns, JSON in cells, errors in tiny text).
+- **The table is now a readable list**: Status · SKU · Item (with "92 × 50 × 14 cm · 2 vendors · ★ Acme" underneath) · Category in words ("Raw material", not RAW) · Cost as `$388.51` · Stock as `1,948` · **"What's going on"** as plain-English colored chips ("SKU shared with row 32", "Name: Name is required", "2 AI suggestions"). Why: an ops admin scans for meaning, not codes.
+- **Click a row → an edit panel slides in**, grouped into Basics / Stock & cost / Dates / Size / Vendors, with each problem and fix (Keep/Undo) next to its field, ↑/↓ to jump between rows needing attention, and "Next issue →". Why: fixing one row at a time with full context is easier than editing tiny spreadsheet cells.
+- **No JSON shown anywhere.** Size is three boxes plus a cm/in picker. Vendors are a small editable list (name, vendor SKU, cost, lead days, ★ preferred, only one allowed, max 3). Truncated vendor JSON is recovered as best we can: "The vendor list in your file was cut off. We recovered what we could." Data is still stored and imported as JSON.
+- **Three stacked banners → one summary card**: the ready count, a progress bar, action buttons (Resolve duplicates · Ask AI · Accept AI · Confirm auto-fixes) and filter chips with counts.
+- **Lighter, modern shell**: Inter, a white translucent header, a light stepper.
+- **Bug found in screenshot review: the panel rendered under the sticky header** (the step animation created a stacking context). Fixed by rendering the panel in a portal. The size inputs were squeezed too; fixed with a grid.
+
 ## Phase 3: make it pretty (motionsites skill)
 - **Design direction: "calm, precise, trustworthy".** One typeface (Geist) plus Geist Mono for small labels and step numbers (`01 / 04`), a dark header, pill buttons and rounded cards. Why: it's a tool an ops admin uses daily, so it should feel reliable and quiet, not flashy.
 - **Signature: a live import-health bar** (ready vs needs attention) that animates as rows get fixed, plus a big `162/200 rows ready` counter. Why: the admin's one question is "how close am I?", and now it's answered at a glance.
