@@ -135,13 +135,23 @@ function MapColumns({ fileName, headers, sample, mapping, setMapping, onBack, on
 function Review({ rows, setRows, existingSkus, onBack, onImported }) {
   const [filter, setFilter] = useState('errors')
   const [busy, setBusy] = useState(false)
+  // Rows the user has edited stay visible in "Needs attention" until they re-click the filter,
+  // so a row doesn't vanish mid-typing the moment it becomes valid.
+  const [touched, setTouched] = useState(new Set())
   const results = useMemo(() => validateRows(rows, existingSkus), [rows, existingSkus])
   const validCount = results.filter((r) => r.valid).length
   const errorCount = rows.length - validCount
-  const visible = rows.map((r, i) => i).filter((i) => filter === 'all' || !results[i].valid)
+  const visible = rows.map((r, i) => i).filter((i) => filter === 'all' || !results[i].valid || touched.has(i))
 
-  const edit = (i, key, value) => setRows(rows.map((r, j) => (j === i ? { ...r, [key]: value } : r)))
-  const remove = (i) => setRows(rows.filter((_, j) => j !== i))
+  const edit = (i, key, value) => {
+    setRows(rows.map((r, j) => (j === i ? { ...r, [key]: value } : r)))
+    if (!touched.has(i)) setTouched(new Set(touched).add(i))
+  }
+  const remove = (i) => {
+    setRows(rows.filter((_, j) => j !== i))
+    setTouched(new Set([...touched].filter((t) => t !== i).map((t) => (t > i ? t - 1 : t))))
+  }
+  const showErrors = () => { setFilter('errors'); setTouched(new Set()) }
 
   const doImport = async () => {
     setBusy(true)
@@ -161,7 +171,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
         <div className="text-lg"><span className="font-semibold text-green-700">{validCount} ready</span>{' · '}
           <span className="font-semibold text-red-600">{errorCount} need attention</span>{' · '}{rows.length} rows</div>
         <div className="ml-auto flex gap-2 text-sm">
-          <button className={`px-3 py-1 rounded ${filter === 'errors' ? 'bg-slate-800 text-white' : 'border'}`} onClick={() => setFilter('errors')}>Needs attention</button>
+          <button className={`px-3 py-1 rounded ${filter === 'errors' ? 'bg-slate-800 text-white' : 'border'}`} onClick={showErrors}>Needs attention</button>
           <button className={`px-3 py-1 rounded ${filter === 'all' ? 'bg-slate-800 text-white' : 'border'}`} onClick={() => setFilter('all')}>All rows</button>
         </div>
       </div>
@@ -172,8 +182,13 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
           </thead>
           <tbody>
             {visible.map((i) => (
-              <tr key={i} className="border-t align-top">
-                <td className="p-2 text-slate-400">{i + 1}{results[i].valid ? ' ✓' : ''}</td>
+              <tr key={i} className={`border-t align-top ${results[i].valid && touched.has(i) ? 'bg-green-50' : ''}`}>
+                <td className="p-2 text-slate-400 whitespace-nowrap">
+                  {i + 1}
+                  {results[i].valid && (touched.has(i)
+                    ? <div className="text-green-700 font-medium">✓ Fixed</div>
+                    : ' ✓')}
+                </td>
                 {FIELD_KEYS.map((k) => {
                   const err = results[i].errors[k]
                   return (
