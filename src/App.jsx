@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import Papa from 'papaparse'
 import { FIELDS, FIELD_KEYS, autoMapHeaders, applyMapping, validateRows } from '../shared/schema.js'
+import { autoFixRow } from '../shared/autofix.js'
+
+// Rows carry their auto-fix log in `_fixes`; strip it before sending/exporting.
+const clean = ({ _fixes, ...r }) => r
 
 const STEPS = ['Upload', 'Map columns', 'Review & fix', 'Results']
 
@@ -30,7 +34,10 @@ export default function App() {
   }
 
   const confirmMapping = () => {
-    setRows(csvRows.map((r) => applyMapping(r, mapping)))
+    setRows(csvRows.map((r) => {
+      const { row, fixes } = autoFixRow(applyMapping(r, mapping))
+      return { ...row, _fixes: fixes }
+    }))
     setStep(2)
   }
 
@@ -139,14 +146,36 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
   // so a row doesn't vanish mid-typing the moment it becomes valid.
   const [touched, setTouched] = useState(new Set())
   const results = useMemo(() => validateRows(rows, existingSkus), [rows, existingSkus])
-  const validCount = results.filter((r) => r.valid).length
-  const errorCount = rows.length - validCount
-  const visible = rows.map((r, i) => i).filter((i) => filter === 'all' || !results[i].valid || touched.has(i))
 
-  const edit = (i, key, value) => {
-    setRows(rows.map((r, j) => (j === i ? { ...r, [key]: value } : r)))
-    if (!touched.has(i)) setTouched(new Set(touched).add(i))
+  // A fix is "active" while the cell still holds the fixed value; "pending" until the user keeps it.
+  const activeFixes = (row) => Object.entries(row._fixes || {}).filter(([k, f]) => row[k] === f.to)
+  const pendingFixes = (row) => activeFixes(row).filter(([, f]) => !f.confirmed)
+  const status = rows.map((row, i) => {
+    const errs = Object.keys(results[i].errors).length
+    const checks = pendingFixes(row).filter(([, f]) => f.warn).length
+    return { errs, checks, ready: errs === 0 && checks === 0 }
+  })
+  const readyCount = status.filter((s) => s.ready).length
+  const attentionCount = rows.length - readyCount
+  const pendingTotal = rows.reduce((n, r) => n + pendingFixes(r).length, 0)
+  const pendingRows = rows.filter((r) => pendingFixes(r).length).length
+  const checkTotal = status.reduce((n, s) => n + s.checks, 0)
+
+  const visible = rows.map((r, i) => i).filter((i) =>
+    filter === 'all' ? true : filter === 'fixed' ? pendingFixes(rows[i]).length > 0 : !status[i].ready || touched.has(i))
+
+  const touch = (i) => { if (!touched.has(i)) setTouched(new Set(touched).add(i)) }
+  const edit = (i, key, value) => { setRows(rows.map((r, j) => (j === i ? { ...r, [key]: value } : r))); touch(i) }
+  const undoFix = (i, key) => edit(i, key, rows[i]._fixes[key].from)
+  const keepFix = (i, key) => {
+    setRows(rows.map((r, j) => (j === i ? { ...r, _fixes: { ...r._fixes, [key]: { ...r._fixes[key], confirmed: true } } } : r)))
+    touch(i)
   }
+  const keepAll = () => setRows(rows.map((r) => {
+    const f = { ...(r._fixes || {}) }
+    for (const [k] of activeFixes(r)) f[k] = { ...f[k], confirmed: true }
+    return { ...r, _fixes: f }
+  }))
   const remove = (i) => {
     setRows(rows.filter((_, j) => j !== i))
     setTouched(new Set([...touched].filter((t) => t !== i).map((t) => (t > i ? t - 1 : t))))
@@ -155,63 +184,104 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
 
   const doImport = async () => {
     setBusy(true)
-    const validRows = rows.filter((_, i) => results[i].valid)
+    const readyRows = rows.filter((_, i) => status[i].ready)
     const res = await fetch('/api/import', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: validRows }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: readyRows.map(clean) }),
     }).then((r) => r.json())
-    const skipped = rows.map((r, i) => ({ r, i })).filter(({ i }) => !results[i].valid)
-      .map(({ r, i }) => ({ row: r, line: i + 1, errors: results[i].errors }))
+    const skipped = rows.map((r, i) => ({ r, i })).filter(({ i }) => !status[i].ready)
+      .map(({ r, i }) => ({
+        row: clean(r), line: i + 1,
+        errors: status[i].errs ? results[i].errors : { _: 'Auto-fix not confirmed (ambiguous value)' },
+      }))
     setBusy(false)
     onImported(res, { skipped })
   }
 
+  const tab = (key, label, onClick) => (
+    <button className={`px-3 py-1 rounded ${filter === key ? 'bg-slate-800 text-white' : 'border bg-white'}`} onClick={onClick || (() => setFilter(key))}>{label}</button>
+  )
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-4 flex-wrap">
-        <div className="text-lg"><span className="font-semibold text-green-700">{validCount} ready</span>{' · '}
-          <span className="font-semibold text-red-600">{errorCount} need attention</span>{' · '}{rows.length} rows</div>
+        <div className="text-lg"><span className="font-semibold text-green-700">{readyCount} ready</span>{' · '}
+          <span className="font-semibold text-red-600">{attentionCount} need attention</span>{' · '}{rows.length} rows</div>
         <div className="ml-auto flex gap-2 text-sm">
-          <button className={`px-3 py-1 rounded ${filter === 'errors' ? 'bg-slate-800 text-white' : 'border'}`} onClick={showErrors}>Needs attention</button>
-          <button className={`px-3 py-1 rounded ${filter === 'all' ? 'bg-slate-800 text-white' : 'border'}`} onClick={() => setFilter('all')}>All rows</button>
+          {tab('errors', `Needs attention (${attentionCount})`, showErrors)}
+          {tab('fixed', `Auto-fixed (${pendingRows})`)}
+          {tab('all', 'All rows')}
         </div>
       </div>
+      {pendingTotal > 0 && (
+        <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg px-4 py-3 flex items-center gap-4 flex-wrap">
+          <div>
+            <div className="font-semibold text-emerald-800">✨ We fixed {pendingTotal} values in {pendingRows} rows for you</div>
+            <div className="text-sm text-emerald-900">Spacing, casing, $ signs, number and date formats, yes/no values.
+              {checkTotal > 0 && <> <b className="text-amber-700">{checkTotal} {checkTotal === 1 ? 'is a guess' : 'are guesses'} you need to confirm</b> before {checkTotal === 1 ? 'it imports' : 'they import'}.</>}</div>
+          </div>
+          <div className="ml-auto flex gap-2">
+            <button className="px-3 py-2 rounded border border-emerald-400 bg-white text-emerald-800 text-sm" onClick={() => setFilter('fixed')}>Review fixes</button>
+            <button className="px-3 py-2 rounded bg-emerald-600 text-white text-sm font-medium" onClick={keepAll}>✓ Confirm all {pendingTotal} fixes</button>
+          </div>
+        </div>
+      )}
       <div className="overflow-auto max-h-[65vh] bg-white rounded-lg shadow-sm">
         <table className="text-xs">
-          <thead className="sticky top-0 bg-slate-100 text-left">
-            <tr><th className="p-2">Row</th>{FIELDS.map((f) => <th key={f.key} className="p-2 whitespace-nowrap">{f.label}{f.required ? ' *' : ''}</th>)}<th /></tr>
+          <thead className="sticky top-0 bg-slate-100 text-left z-10">
+            <tr><th className="p-2">Row</th><th className="p-2">Status</th>{FIELDS.map((f) => <th key={f.key} className="p-2 whitespace-nowrap">{f.label}{f.required ? ' *' : ''}</th>)}<th /></tr>
           </thead>
           <tbody>
-            {visible.map((i) => (
-              <tr key={i} className={`border-t align-top ${results[i].valid && touched.has(i) ? 'bg-green-50' : ''}`}>
-                <td className="p-2 text-slate-400 whitespace-nowrap">
-                  {i + 1}
-                  {results[i].valid && (touched.has(i)
-                    ? <div className="text-green-700 font-medium">✓ Fixed</div>
-                    : ' ✓')}
-                </td>
-                {FIELD_KEYS.map((k) => {
-                  const err = results[i].errors[k]
-                  return (
-                    <td key={k} className="p-1">
-                      <input title={err || ''} value={rows[i][k]} onChange={(e) => edit(i, k, e.target.value)}
-                        className={`w-36 px-2 py-1 rounded border font-mono ${err ? 'border-red-400 bg-red-50' : 'border-transparent hover:border-slate-200'}`} />
-                      {err && <div className="text-red-600 w-36 mt-0.5 leading-tight">{err}</div>}
-                    </td>
-                  )
-                })}
-                <td className="p-2"><button className="text-slate-400 hover:text-red-600" title="Skip this row" onClick={() => remove(i)}>✕</button></td>
-              </tr>
-            ))}
-            {visible.length === 0 && <tr><td className="p-6 text-slate-500" colSpan={FIELDS.length + 2}>Nothing needs attention. 🎉</td></tr>}
+            {visible.map((i) => {
+              const st = status[i]
+              return (
+                <tr key={i} className={`border-t align-top ${st.ready && touched.has(i) ? 'bg-green-50/60' : ''}`}>
+                  <td className="p-2 text-slate-400">{i + 1}</td>
+                  <td className="p-2 whitespace-nowrap">
+                    {st.errs > 0 ? <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">● Needs you: {st.errs} field{st.errs > 1 ? 's' : ''}</span>
+                      : st.checks > 0 ? <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">● Check {st.checks} fix{st.checks > 1 ? 'es' : ''}</span>
+                      : <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">● Ready</span>}
+                  </td>
+                  {FIELD_KEYS.map((k) => {
+                    const err = results[i].errors[k]
+                    const fix = rows[i]._fixes?.[k]
+                    const fixed = fix && !fix.confirmed && rows[i][k] === fix.to
+                    const tone = fixed ? (fix.warn ? 'border-amber-400 bg-amber-50' : 'border-emerald-400 bg-emerald-50')
+                      : err ? 'border-red-400 bg-red-50' : 'border-transparent hover:border-slate-200'
+                    return (
+                      <td key={k} className="p-1">
+                        <input title={err || (fixed ? `Was "${fix.from}": ${fix.why}` : '')} value={rows[i][k]} onChange={(e) => edit(i, k, e.target.value)}
+                          className={`w-36 px-2 py-1 rounded border font-mono ${tone}`} />
+                        {fixed && (
+                          <div className={`w-36 mt-1 p-1.5 rounded leading-tight ${fix.warn ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
+                            <div className="font-semibold">{fix.warn ? '⚠ Please check' : '✨ Fixed'}</div>
+                            <div>was <span className="font-mono line-through">{fix.from.trim() === '' ? '(spaces)' : fix.from}</span></div>
+                            <div className="opacity-75">{fix.why}</div>
+                            <div className="flex gap-1 mt-1">
+                              <button className="px-1.5 rounded bg-white border font-medium" onClick={() => keepFix(i, k)}>✓ Keep</button>
+                              <button className="px-1.5 rounded bg-white border" onClick={() => undoFix(i, k)}>↶ Undo</button>
+                            </div>
+                          </div>
+                        )}
+                        {err && (fixed
+                          ? <div className="text-orange-700 w-36 mt-1 leading-tight">Still needs you: {err}</div>
+                          : <div className="text-red-600 w-36 mt-0.5 leading-tight">{err}</div>)}
+                      </td>
+                    )
+                  })}
+                  <td className="p-2"><button className="text-slate-400 hover:text-red-600" title="Skip this row" onClick={() => remove(i)}>✕</button></td>
+                </tr>
+              )
+            })}
+            {visible.length === 0 && <tr><td className="p-6 text-slate-500" colSpan={FIELDS.length + 3}>Nothing here. 🎉</td></tr>}
           </tbody>
         </table>
       </div>
       <div className="flex gap-3 items-center">
         <button className="px-4 py-2 rounded border" onClick={onBack}>Back</button>
-        <button disabled={!validCount || busy} className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50" onClick={doImport}>
-          {busy ? 'Importing…' : `Import ${validCount} item${validCount === 1 ? '' : 's'}`}
+        <button disabled={!readyCount || busy} className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50" onClick={doImport}>
+          {busy ? 'Importing…' : `Import ${readyCount} item${readyCount === 1 ? '' : 's'}`}
         </button>
-        {errorCount > 0 && <span className="text-sm text-slate-600">{errorCount} rows with problems will not be imported until fixed.</span>}
+        {attentionCount > 0 && <span className="text-sm text-slate-600">{attentionCount} rows will be held back. You can fix them now, or import the ready ones and download the rest afterwards.</span>}
       </div>
     </div>
   )

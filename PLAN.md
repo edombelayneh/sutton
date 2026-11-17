@@ -53,10 +53,10 @@ An ops admin. Not a developer. Used to Excel. Wants confidence, not JSON.
 - [ ] Test with the clean + messy samples
 
 ### Phase 2: Make it effortless
-- [ ] Auto-fix safe issues + a "what we changed" before → after view
+- [x] Auto-fix safe issues + a "what we changed" before → after view
 - [ ] AI header mapping fallback
 - [ ] AI suggestions for remaining errors (one-click accept)
-- [ ] Download rejected rows as CSV
+- [x] Download rejected rows as CSV (done in Phase 1)
 
 ### Phase 3: Make it pretty (motionsites, only when you say go)
 - [ ] _TBD_

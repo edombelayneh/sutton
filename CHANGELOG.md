@@ -2,6 +2,20 @@
 
 Newest entries at the top.
 
+## UX: make fixes obvious and actionable
+- **Fixed cells are now solid green with a "✨ Fixed" card (was faint blue).** Why: in hand-testing the blue was easy to miss.
+- **A fixed cell is never red.** If a fixed value still has a problem (e.g. an uppercased SKU that's a duplicate), it stays green with "Still needs you: …" underneath. Why: red + blue together left the user unsure whether to act.
+- **✓ Keep / ↶ Undo on every fix, plus "✓ Confirm all N fixes" in the banner.** Why: the admin needs a clear way to say "yes, that's right" and move on.
+- **Status column per row: ● Ready / ● Check N fixes / ● Needs you: N fields.** Why: each row now says exactly what (if anything) the admin has to do.
+- **Ambiguous auto-fixes (e.g. `05/07/2024` dates) must be confirmed before they import.** Why: we never silently import a guess.
+
+## Phase 2a: safe auto-fixes
+- **Added `shared/autofix.js`: deterministic fixes applied right after column mapping.** Fixes: trim/uppercase SKUs, trim names, category words (`Raw Material` → RAW), UoM case (`ea` → EA), `$` signs, comma decimals (`0,26` → 0.26), thousands separators (`1,200`), yes/1/TRUE → true, dates (`Jan 7, 2024`, `05/07/2024`) → YYYY-MM-DD, tags lowercased and de-duplicated. Why: these are tedious, unambiguous fixes the admin would otherwise do by hand in Excel. On the messy sample, valid rows go from **139 → 165**.
+- **Only "safe" fixes are automatic.** `TBD` costs, negative costs, `12.5` quantities, `maybe`, `Misc`, broken JSON and duplicates are left for the user. Why: guessing there could silently import wrong data, which breaks the admin's trust.
+- **Ambiguous dates (e.g. `05/07/2024`) are converted as US MM/DD but highlighted amber "please double-check".** Why: it's probably right for a US warehouse, but the admin should confirm instead of us hiding the assumption.
+- **Every fix is visible and undoable**: blue cells, "was X" with the reason, a ↶ undo button, an "Auto-fixed" filter and a summary banner. Why: "trust what got in" means no silent changes.
+- **The clean sample produces 0 fixes.** Why: a sanity check that auto-fix never touches good data.
+
 ## Fix: rows vanished while typing
 - **Edited rows now stay visible in "Needs attention" and turn green with "✓ Fixed".** Why: the filter hid a row the moment it became valid, even partway through a word, so the admin couldn't finish typing and got no confirmation the fix worked. Clicking "Needs attention" again clears the fixed rows away. (Found by hand-testing.)
 
