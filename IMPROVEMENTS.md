@@ -19,7 +19,7 @@ New entries are added only after the owner approves them.
 - Credentials are checked against a stored employee table. Passwords are hashed (Node's built-in `scrypt`), never stored as plain text.
 - The server creates a session (httpOnly cookie). Every `/api/*` route except login requires a session.
 - There's a seed script for the first employees, because there is no sign-up page.
-- Until #4 is decided, employees live in `data/employees.json`, and they move to the database along with everything else.
+- Employees live in an `employees` table in PostgreSQL (#4 is done).
 
 ## 2. Imported by + filter
 - Each batch and each item records `imported_by: { id, name }`, taken from the session on the server (never trusted from the browser).

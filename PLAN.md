@@ -13,7 +13,7 @@ An ops admin. Not a developer. Used to Excel. Wants confidence, not JSON.
 
 ## Decisions
 - **Stack:** Vite + React + Tailwind (frontend) + Express (`server/`). One `npm run dev` starts both.
-- **Existing records:** stored in PostgreSQL (`server/db.js`, `migrations/`), plain SQL with `pg`. Imports and undo are transactions. SKU uniqueness is checked against the file **and** the database. (Was `data/items.json` before Phase 5; we started the database empty.)
+- **Existing records:** stored in PostgreSQL (`server/db.js`, `migrations/`), plain SQL with `pg`. Imports and undo are transactions. SKU uniqueness is checked against the file **and** the database. (Was `data/items.json` before Phase 5; we started the database empty and deleted the JSON files.)
 - **AI:** Groq via `server/ai.js`, server-side only. Key in `.env` (`GROQ_API_KEY`, never committed). The app works fully without a key; only the AI features turn off.
 - **Validation lives in `shared/`**, so the browser gives instant feedback and the server re-checks on import (the server is the source of truth).
 

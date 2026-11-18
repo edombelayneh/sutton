@@ -100,4 +100,4 @@ Built in one hour, pairing with **Claude Code** (Claude Opus 5.5) as the agent:
 npm run zip
 ```
 
-Creates `../sutton-submission.zip` with the source and the `.git` folder. It leaves out `node_modules`, `dist`, `data/` (old JSON files from before the database) and `.env` (your API key).
+Creates `../sutton-submission.zip` with the source and the `.git` folder. It leaves out `node_modules`, `dist` and `.env` (your API key).
