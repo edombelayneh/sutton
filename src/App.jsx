@@ -725,6 +725,7 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
   const [editing, setEditing] = useState(null) // raw-string row being edited
   const [serverErr, setServerErr] = useState({})
   const [tab, setTab] = useState('items')
+  const [who, setWho] = useState('') // employee id to filter by, '' = everyone
   const reload = () => fetch('/api/items').then((r) => r.json()).then(setItems).catch(() => setItems([]))
   useEffect(() => { reload() }, [])
 
@@ -757,7 +758,8 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
   }
   const editErrors = editing ? { ...parseRow(editing).errors, ...serverErr } : {}
   const list = (items || []).slice().reverse()
-    .filter((it) => !q || `${it.sku} ${it.name}`.toLowerCase().includes(q.toLowerCase()))
+    .filter((it) => !who || String(it.imported_by?.id) === who)
+    .filter((it) => !q || `${it.sku} ${it.name} ${it.imported_by?.name ?? ''} ${it.imported_by?.employee_id ?? ''}`.toLowerCase().includes(q.toLowerCase()))
   const dims = (d) => (d ? `${d.length} × ${d.width} × ${d.height} ${d.unit || 'cm'}` : '')
   const vend = (v) => (v?.length ? `${v.length} vendor${v.length > 1 ? 's' : ''}${v.find((x) => x.is_preferred) ? ` · ★ ${v.find((x) => x.is_preferred).vendor_name}` : ''}` : '')
   return createPortal(
@@ -775,7 +777,8 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
                 className={`px-3 py-1.5 rounded-md transition-colors ${tab === k ? 'bg-white shadow-sm font-medium text-slate-900' : 'text-slate-500 hover:text-slate-900'}`}>{label}</button>
             ))}
           </div>
-          {tab === 'items' && <input autoFocus placeholder="Search SKU or name…" value={q} onChange={(e) => setQ(e.target.value)}
+          {tab === 'items' && <PersonFilter people={(items || []).map((it) => it.imported_by)} value={who} onChange={setWho} />}
+          {tab === 'items' && <input autoFocus placeholder="Search SKU, name or employee…" value={q} onChange={(e) => setQ(e.target.value)}
             className="ml-auto w-72 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />}
           {tab === 'items' && items?.length > 0 && <button className="px-3 py-2 rounded-lg border border-red-200 text-red-600 text-sm hover:bg-red-50" onClick={clearAll}>Clear all</button>}
           <button className={`${tab === 'history' ? 'ml-auto ' : ''}px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800`} onClick={onImportAnother}>Import another file</button>
@@ -788,7 +791,7 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-white text-left text-xs text-slate-400 border-b border-slate-100">
               <tr><th className="py-3 pl-6 pr-3 font-medium">SKU</th><th className="px-3 font-medium">Item</th><th className="px-3 font-medium">Category</th>
-                <th className="px-3 font-medium text-right">Cost</th><th className="px-3 font-medium text-right">In stock</th><th className="px-3 pr-6 font-medium">Imported</th></tr>
+                <th className="px-3 font-medium text-right">Cost</th><th className="px-3 font-medium text-right">In stock</th><th className="px-3 font-medium">Imported by</th><th className="px-3 pr-6 font-medium">Imported</th></tr>
             </thead>
             <tbody>
               {list.map((it) => (
@@ -801,10 +804,11 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
                   <td className="px-3 whitespace-nowrap">{CAT_LABEL[it.category] || it.category}</td>
                   <td className="px-3 text-right tabular-nums">{money(String(it.unit_cost))}</td>
                   <td className="px-3 text-right tabular-nums">{count(String(it.quantity_on_hand ?? 0))}</td>
+                  <td className="px-3 whitespace-nowrap">{it.imported_by ? <><div>{it.imported_by.name}</div><div className="text-xs text-slate-400 font-mono">{it.imported_by.employee_id}</div></> : <span className="text-slate-300">–</span>}</td>
                   <td className="px-3 pr-6 text-xs text-slate-500 whitespace-nowrap">{it.imported_at ? new Date(it.imported_at).toLocaleString() : '–'}</td>
                 </tr>
               ))}
-              {items && list.length === 0 && <tr><td colSpan={6} className="p-10 text-center text-slate-500">{q ? 'No items match your search.' : 'Nothing imported yet.'}</td></tr>}
+              {items && list.length === 0 && <tr><td colSpan={7} className="p-10 text-center text-slate-500">{q || who ? 'No items match your search.' : 'Nothing imported yet.'}</td></tr>}
             </tbody>
           </table>
         </div>
@@ -836,6 +840,7 @@ function UploadHistory({ onRestored }) {
   const [list, setList] = useState(null)
   const [busy, setBusy] = useState(null)
   const [msg, setMsg] = useState('')
+  const [who, setWho] = useState('')
   const load = () => fetch('/api/batches').then((r) => r.json()).then(setList).catch(() => setList([]))
   useEffect(() => { load() }, [])
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
@@ -853,20 +858,24 @@ function UploadHistory({ onRestored }) {
   return (
     <div className="flex-1 overflow-auto">
       <div className="max-w-6xl mx-auto px-6 py-6 space-y-3">
-        <p className="text-sm text-slate-600">Every upload, newest first. <b>Restore to before this</b> puts the inventory back exactly as it was before that upload.</p>
+        <div className="flex items-center gap-4 flex-wrap">
+          <p className="text-sm text-slate-600 flex-1 min-w-[280px]">Every upload, newest first. <b>Restore to before this</b> puts the inventory back exactly as it was before that upload.</p>
+          <PersonFilter label="Uploaded by" people={(list || []).map((b) => b.imported_by)} value={who} onChange={setWho} />
+        </div>
         {msg && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 text-sm text-emerald-900">{msg}</div>}
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-slate-400 border-b border-slate-100">
-              <tr><th className="py-3 pl-6 pr-3 font-medium">Uploaded</th><th className="px-3 font-medium">Files</th><th className="px-3 font-medium">Result</th><th className="px-3 pr-6" /></tr>
+              <tr><th className="py-3 pl-6 pr-3 font-medium">Uploaded</th><th className="px-3 font-medium">By</th><th className="px-3 font-medium">Files</th><th className="px-3 font-medium">Result</th><th className="px-3 pr-6" /></tr>
             </thead>
             <tbody>
-              {(list || []).map((b, i) => (
+              {(list || []).filter((b) => !who || String(b.imported_by?.id) === who).map((b) => (
                 <tr key={b.id} className="border-b border-slate-50 align-top">
                   <td className="py-3 pl-6 pr-3 whitespace-nowrap">
                     <div>{new Date(b.imported_at).toLocaleString()}</div>
-                    {i === 0 && <div className="text-xs text-slate-400">Latest</div>}
+                    {b.id === list[0].id && <div className="text-xs text-slate-400">Latest</div>}
                   </td>
+                  <td className="px-3 py-3 whitespace-nowrap">{b.imported_by ? <><div>{b.imported_by.name}</div><div className="text-xs text-slate-400 font-mono">{b.imported_by.employee_id}</div></> : <span className="text-slate-300">–</span>}</td>
                   <td className="px-3 py-3 font-mono text-xs text-slate-600">{b.files.length ? b.files.join(', ') : '–'}</td>
                   <td className="px-3 py-3 text-xs">
                     <span className="text-emerald-700">{b.added} added</span>
@@ -882,13 +891,30 @@ function UploadHistory({ onRestored }) {
                   </td>
                 </tr>
               ))}
-              {list && list.length === 0 && <tr><td colSpan={4} className="p-10 text-center text-slate-500">No uploads yet.</td></tr>}
-              {!list && <tr><td colSpan={4} className="p-10 text-center text-slate-500">Loading…</td></tr>}
+              {list && list.length === 0 && <tr><td colSpan={5} className="p-10 text-center text-slate-500">No uploads yet.</td></tr>}
+              {list && list.length > 0 && who && !list.some((b) => String(b.imported_by?.id) === who) && <tr><td colSpan={5} className="p-10 text-center text-slate-500">No uploads by this person.</td></tr>}
+              {!list && <tr><td colSpan={5} className="p-10 text-center text-slate-500">Loading…</td></tr>}
             </tbody>
           </table>
         </div>
       </div>
     </div>
+  )
+}
+
+const personLabel = (p) => (p ? `${p.name} (${p.employee_id})` : '–')
+// Dropdown of everyone who appears in `people` (deduped), plus "Everyone". value = employee db id as a string, '' = everyone.
+function PersonFilter({ people, value, onChange, label = 'Imported by' }) {
+  const opts = [...new Map(people.filter(Boolean).map((p) => [p.id, p])).values()].sort((a, b) => a.name.localeCompare(b.name))
+  return (
+    <label className="flex items-center gap-2 text-sm text-slate-600">
+      <span className="whitespace-nowrap">{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)}
+        className="rounded-lg border border-slate-200 px-2.5 py-2 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-300">
+        <option value="">Everyone</option>
+        {opts.map((p) => <option key={p.id} value={String(p.id)}>{personLabel(p)}</option>)}
+      </select>
+    </label>
   )
 }
 
@@ -936,6 +962,8 @@ function ItemDetail({ item: it, onClose, onEdit, onDelete }) {
           <Row label="First received">{it.first_received_on}</Row>
           <Row label="Discontinued">{it.discontinued_on}</Row>
           <Row label="Imported">{it.imported_at ? new Date(it.imported_at).toLocaleString() : null}</Row>
+          <Row label="Imported by">{it.imported_by ? personLabel(it.imported_by) : null}</Row>
+          <Row label="Last edited">{it.updated_at ? `${new Date(it.updated_at).toLocaleString()}${it.updated_by ? ` by ${personLabel(it.updated_by)}` : ''}` : null}</Row>
         </section>
         <section>
           <h3 className="text-sm font-semibold mb-1">Size</h3>

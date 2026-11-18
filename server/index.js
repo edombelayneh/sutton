@@ -19,17 +19,25 @@ const route = (fn) => (req, res, next) => fn(req, res, next).catch((e) => {
 })
 
 // ---- Item writes. Every change goes through these, so the change log is always complete. ----
-const COLS = [...ITEM_COLUMNS, 'batch_id', 'imported_at', 'updated_at']
+const COLS = [...ITEM_COLUMNS, 'batch_id', 'imported_at', 'updated_at', 'imported_by', 'updated_by']
 const INSERT = `INSERT INTO items (${COLS.join(', ')}) VALUES (${COLS.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING *`
-const insertRow = async (c, item, { batch_id = null, imported_at = new Date().toISOString(), updated_at = null } = {}) =>
-  fromRow((await c.query(INSERT, [...toValues(item), batch_id, imported_at, updated_at])).rows[0])
+const insertRow = async (c, item, { batch_id = null, imported_at = new Date().toISOString(), updated_at = null, imported_by = null, updated_by = null } = {}) =>
+  fromRow((await c.query(INSERT, [...toValues(item), batch_id, imported_at, updated_at, imported_by, updated_by])).rows[0])
 const removeRow = async (c, sku) => {
   const { rows } = await c.query('DELETE FROM items WHERE sku = $1 RETURNING *', [sku])
   return rows[0] ? fromRow(rows[0]) : null
 }
-const logChange = (c, { batch_id = null, kind, sku, before, after }) =>
-  c.query('INSERT INTO item_changes (batch_id, kind, sku, before, after) VALUES ($1, $2, $3, $4, $5)',
-    [batch_id, kind, sku, before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null])
+const logChange = (c, { batch_id = null, kind, sku, before, after, by }) =>
+  c.query('INSERT INTO item_changes (batch_id, kind, sku, before, after, changed_by) VALUES ($1, $2, $3, $4, $5, $6)',
+    [batch_id, kind, sku, before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null, by ?? null])
+
+// In API responses, people appear as { id, employee_id, name } instead of a bare database id.
+const people = async () => new Map((await pool.query('SELECT id, employee_id, name FROM employees')).rows.map((e) => [e.id, e]))
+const withPeople = (item, map) => ({
+  ...item,
+  ...(item.imported_by != null && { imported_by: map.get(item.imported_by) || null }),
+  ...(item.updated_by != null && { updated_by: map.get(item.updated_by) || null }),
+})
 // Writers wait for each other, so the change log order is the real order of changes.
 const lockItems = (c) => c.query('LOCK TABLE items IN SHARE ROW EXCLUSIVE MODE')
 
@@ -70,7 +78,8 @@ app.use('/api', requireAuth)
 // All items already in the system.
 app.get('/api/items', route(async (_req, res) => {
   const { rows } = await pool.query('SELECT * FROM items ORDER BY imported_at, sku')
-  res.json(rows.map(fromRow))
+  const map = await people()
+  res.json(rows.map((r) => withPeople(fromRow(r), map)))
 }))
 
 // Remove everything (handy for demos). Also clears upload history.
@@ -88,16 +97,17 @@ app.put('/api/items/:sku', route(async (req, res) => {
     await lockItems(c)
     const before = await removeRow(c, req.params.sku)
     if (!before) return null
-    const after = await insertRow(c, item, { imported_at: before.imported_at, updated_at: new Date().toISOString() })
-    if (item.sku === req.params.sku) await logChange(c, { kind: 'edit', sku: item.sku, before, after })
+    const by = req.employee.id
+    const after = await insertRow(c, item, { imported_at: before.imported_at, imported_by: before.imported_by, updated_at: new Date().toISOString(), updated_by: by })
+    if (item.sku === req.params.sku) await logChange(c, { kind: 'edit', sku: item.sku, before, after, by })
     else { // SKU renamed: the old SKU is gone and a new one exists
-      await logChange(c, { kind: 'edit', sku: req.params.sku, before, after: null })
-      await logChange(c, { kind: 'edit', sku: item.sku, before: null, after })
+      await logChange(c, { kind: 'edit', sku: req.params.sku, before, after: null, by })
+      await logChange(c, { kind: 'edit', sku: item.sku, before: null, after, by })
     }
     return after
   })
   if (!out) return res.status(404).json({ error: 'Item not found' })
-  res.json(out)
+  res.json(withPeople(out, await people()))
 }))
 
 // Delete one imported item.
@@ -105,7 +115,7 @@ app.delete('/api/items/:sku', route(async (req, res) => {
   const ok = await tx(async (c) => {
     await lockItems(c)
     const before = await removeRow(c, req.params.sku)
-    if (before) await logChange(c, { kind: 'delete', sku: before.sku, before, after: null })
+    if (before) await logChange(c, { kind: 'delete', sku: before.sku, before, after: null, by: req.employee.id })
     return Boolean(before)
   })
   if (!ok) return res.status(404).json({ error: 'Item not found' })
@@ -128,15 +138,16 @@ app.post('/api/import', route(async (req, res) => {
     const batch = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
     const now = new Date().toISOString()
     const mark = (await c.query('SELECT coalesce(max(id), 0) AS m FROM item_changes')).rows[0].m
-    await c.query('INSERT INTO import_batches (id, imported_at, files, after_change) VALUES ($1, $2, $3, $4)', [batch, now, files, mark])
+    const by = req.employee.id
+    await c.query('INSERT INTO import_batches (id, imported_at, files, after_change, imported_by) VALUES ($1, $2, $3, $4, $5)', [batch, now, files, mark, by])
     const imported = []
     const rejected = []
     let updated = 0
     for (const [i, r] of results.entries()) {
       if (!r.valid) { rejected.push({ index: i, sku: rows[i].sku, errors: r.errors }); continue }
       const before = existing.has(r.item.sku) ? await removeRow(c, r.item.sku) : null
-      const after = await insertRow(c, r.item, { batch_id: batch, imported_at: now })
-      await logChange(c, { batch_id: batch, kind: before ? 'update' : 'import', sku: r.item.sku, before, after })
+      const after = await insertRow(c, r.item, { batch_id: batch, imported_at: now, imported_by: by })
+      await logChange(c, { batch_id: batch, kind: before ? 'update' : 'import', sku: r.item.sku, before, after, by })
       if (before) updated++
       imported.push(r.item.sku)
     }
@@ -151,10 +162,11 @@ app.post('/api/import', route(async (req, res) => {
 app.get('/api/batches', route(async (_req, res) => {
   const { rows } = await pool.query(`
     SELECT b.id, b.seq, b.imported_at, b.files, b.added, b.updated, b.rejected,
+      CASE WHEN e.id IS NULL THEN NULL ELSE json_build_object('id', e.id, 'employee_id', e.employee_id, 'name', e.name) END AS imported_by,
       (SELECT count(*) FROM import_batches l WHERE l.seq > b.seq)::int AS later_uploads,
       -- one edit/delete = one transaction = one now(); a rename logs two rows but is one edit
       (SELECT count(DISTINCT ch.at) FROM item_changes ch WHERE ch.id > b.after_change AND ch.batch_id IS NULL)::int AS later_edits
-    FROM import_batches b ORDER BY b.seq DESC`)
+    FROM import_batches b LEFT JOIN employees e ON e.id = b.imported_by ORDER BY b.seq DESC`)
   res.json(rows.map((r) => ({ ...r, seq: Number(r.seq), imported_at: r.imported_at.toISOString() })))
 }))
 
@@ -172,7 +184,8 @@ async function restoreBefore(id) {
       await removeRow(c, ch.sku)
       if (ch.before) {
         const p = ch.before
-        await insertRow(c, p, { batch_id: surviving.has(p.batch) ? p.batch : null, imported_at: p.imported_at, updated_at: p.updated_at ?? null })
+        await insertRow(c, p, { batch_id: surviving.has(p.batch) ? p.batch : null, imported_at: p.imported_at, updated_at: p.updated_at ?? null,
+          imported_by: p.imported_by ?? null, updated_by: p.updated_by ?? null })
       }
     }
     // Safety net: any item still pointing at an upload we're undoing goes too, even if the log has no

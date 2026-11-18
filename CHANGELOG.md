@@ -2,6 +2,13 @@
 
 Newest entries at the top.
 
+## "Imported by": who did what
+- Every upload and item now records **who imported it**, and items also record **who last edited them** (`migrations/004_imported_by.sql`). The server takes this from the signed-in session; the browser can't set it.
+- **Imported items:** a new "Imported by" column, an **Imported by** filter (Everyone or one employee), and search now also matches an employee's name or ID. Item details show who imported it and who last edited it, and when.
+- **Upload history:** a "By" column and an **Uploaded by** filter.
+- The change log records who made each change, and restoring to before an upload brings back who imported or edited each item as well.
+- Why: gap #2 in IMPROVEMENTS.md. Admins need to see and review one person's imports.
+
 ## Sign-in: email or employee ID + password
 - **Everything now requires signing in.** The app opens on a sign-in screen (email *or* employee ID, any case), and the header shows who's signed in with a **Sign out** button. If a session expires, you're returned to sign-in with a note.
 - **Server** (`server/auth.js`, `migrations/003_auth.sql`): employees and sessions in PostgreSQL. Passwords are hashed with scrypt; sessions use a random token in an HttpOnly, SameSite=Lax cookie (12 hours), stored only as a SHA-256 hash. Every `/api` route except sign-in and health returns 401 without a session.

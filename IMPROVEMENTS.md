@@ -6,7 +6,7 @@ New entries are added only after the owner approves them.
 | # | Gap | Why it matters | Status |
 |---|-----|----------------|--------|
 | 1 | No login | Anyone who can open the app can import, edit or delete inventory, and nothing records who did it | Done |
-| 2 | No "imported by" record | You can't tell who imported a batch or filter imports by employee | Planned (needs #1) |
+| 2 | No "imported by" record | You can't tell who imported a batch or filter imports by employee | Done |
 | 3 | Multi-file uploads repeat headers and drop data | Headers are merged only when the text matches exactly, so `SKU`, `SKU ` and `sku` show up as separate rows on the Map step. Only one of them gets mapped to the SKU field, so the **other files' rows lose their SKU values** | Done |
 | 4 | Data is stored in JSON files | A JSON file doesn't scale, has no real queries or relations, and can't safely handle several users at once. Employees (#1) and audit data (#2) make this more pressing | Done |
 | 5 | No automated tests | Bugs like the multi-file SKU loss (#3) went unnoticed because nothing checks behavior automatically. Every change risks breaking import, auto-fix or validation without anyone knowing | Planned |
@@ -34,6 +34,13 @@ New entries are added only after the owner approves them.
 - Each batch and each item records `imported_by: { id, name }`, taken from the session on the server (never trusted from the browser).
 - Edits record `updated_by` the same way.
 - The Imported items page gets an "Imported by" column, plus a filter that searches by employee name or ID.
+- **Done:**
+  - `migrations/004_imported_by.sql`: `imported_by` on uploads and items, `updated_by` on items, `changed_by` on every change-log entry.
+  - The server sets these from the signed-in session. Anything the browser sends for them is ignored (tested).
+  - Editing keeps the original importer and records the editor. Restoring to before an upload brings back who imported or edited each item, too.
+  - **Imported items:** "Imported by" column, an **Imported by: Everyone / name (ID)** filter, and a search box that also matches employee name or ID. Item details show **Imported by** and **Last edited … by …**.
+  - **Upload history:** "By" column and an **Uploaded by** filter.
+  - Items imported before this change show "–".
 
 ## 3. Consistent headers across multiple files
 - **Root cause:** in `src/App.jsx` (`loadFiles`), headers are deduped by exact text. Then `autoMapHeaders` in `shared/schema.js` lets only one header claim each field, so a second file's `SKU ` stays unmapped.
