@@ -2,6 +2,13 @@
 
 Newest entries at the top.
 
+## Sign-in: email or employee ID + password
+- **Everything now requires signing in.** The app opens on a sign-in screen (email *or* employee ID, any case), and the header shows who's signed in with a **Sign out** button. If a session expires, you're returned to sign-in with a note.
+- **Server** (`server/auth.js`, `migrations/003_auth.sql`): employees and sessions in PostgreSQL. Passwords are hashed with scrypt; sessions use a random token in an HttpOnly, SameSite=Lax cookie (12 hours), stored only as a SHA-256 hash. Every `/api` route except sign-in and health returns 401 without a session.
+- **Safety:** one message for "wrong password" and "no such account" (with equal timing), and 5 failed attempts lock an account for 15 minutes.
+- **No sign-up page:** admins run `npm run employee -- add --id E1001 --name "…" --email …` (hidden password prompt), and `password` / `deactivate` / `activate` / `list` to manage people.
+- Why: gap #1 in IMPROVEMENTS.md. Only real employees should change inventory, and #2 ("imported by") needs to know who's signed in.
+
 ## Upload history: restore to before any upload
 - **Imported items** now has **Items | Upload history** tabs. History shows every upload (time, file names, added / updated / not imported) with **↶ Restore to before this**.
 - Restoring puts the inventory back **exactly** as it was before that upload: it undoes that upload, every later upload, and any edits, deletes or renames made since. The confirm dialog lists what else gets undone. "Undo this import" on the results page does the same and warns if anything changed since.

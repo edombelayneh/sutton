@@ -33,7 +33,7 @@ Each feature, why it helps the user, and its status.
 | 10b | Color-coded sources (purple AI, green fixed, amber guess, orange duplicate, red needs you) + "🤖 AI" filter + Accept all | The admin can tell at a glance who changed what, and review AI work in bulk | Done |
 | 10 | 🤖 AI suggestions for remaining errors (category from name, cost from vendor, repair JSON, …), each one Keep/Undo | Does the tedious judgment-call work for them, but never imports anything they haven't approved | Done (needs `GROQ_API_KEY`) |
 | 23 | Multi-file uploads: one Map row per field, so every file's matching column (`SKU`, `SKU `, `Item Code`…) feeds the same field | No duplicate headers, and no file silently loses its data | Done |
-| 24 | Sign in with email or employee ID + password, checked against stored employees | Only real employees can change inventory | Planned |
+| 24 | Sign in with email or employee ID + password, checked against stored employees | Only real employees can change inventory | Done |
 | 25 | "Imported by" on every batch and item + filter by employee name or ID | They know who imported what and can review one person's work | Planned |
 | 27 | Upload history tab + "↶ Restore to before this" on any past upload (undoes it, later uploads and later edits, exactly) | A bad upload is never permanent, even days later | Done |
 | 26 | Move storage from JSON files to a database (PostgreSQL vs alternatives, see IMPROVEMENTS.md) | Safe multi-user saves, fast filtering, a foundation for logins and audit data | Done (PostgreSQL) |

@@ -11,8 +11,11 @@ brew install postgresql@18             # once (macOS; any Postgres works)
 brew services start postgresql@18      # keeps it running in the background
 createdb sutton                        # once
 npm install
+npm run employee -- add --id E1001 --name "Your Name" --email you@company.com   # once: asks for a password
 npm run dev
 ```
+
+Sign in with your **email or employee ID** and the password you chose. There's no sign-up page: add, reset or block people with `npm run employee -- add | password <id> | deactivate <id> | activate <id> | list` (see `server/employees.js`).
 
 The server creates its tables on startup (`migrations/*.sql`). To use a different database, set `DATABASE_URL` in `.env` (default `postgres://localhost/sutton`).
 
@@ -54,7 +57,7 @@ Restart `npm run dev` after adding the key. **Without a key everything works**; 
 |---|---|---|
 | Validation rules | `shared/schema.js` | One module used by **both** the browser (instant feedback) and the server (source of truth). All field rules plus cross-row rules (unique SKU in the file *and* the store, ≤ 1 preferred vendor, discontinued ⇒ inactive). |
 | Safe auto-fixes | `shared/autofix.js` | Deterministic; each fix records `from`, `to`, `why` and whether it's a guess. Also the SKU generator. |
-| API + store | `server/index.js` | Express. `GET/DELETE /api/items`, `POST /api/import`, `POST /api/import/:batch/undo`, `GET /api/batches`, `POST /api/batches/:id/restore`, `PUT/DELETE /api/items/:sku`, `POST /api/ai/map`, `POST /api/ai/suggest`. Items are stored in **PostgreSQL** (`server/db.js`, schema in `migrations/`). Each import and each undo runs as **one transaction**, and the database also enforces the schema rules (SKU format, categories, cost ≥ 0, discontinued ⇒ inactive, unique SKU). The API listens on **127.0.0.1 only**. |
+| API + store | `server/index.js` | Express. `GET/DELETE /api/items`, `POST /api/import`, `POST /api/import/:batch/undo`, `GET /api/batches`, `POST /api/batches/:id/restore`, `PUT/DELETE /api/items/:sku`, `POST /api/ai/map`, `POST /api/ai/suggest`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`. **Every route except sign-in and `/api/health` needs a signed-in employee** (`server/auth.js`). Items are stored in **PostgreSQL** (`server/db.js`, schema in `migrations/`). Each import and each undo runs as **one transaction**, and the database also enforces the schema rules (SKU format, categories, cost ≥ 0, discontinued ⇒ inactive, unique SKU). The API listens on **127.0.0.1 only**. |
 | AI client | `server/ai.js` | A small Groq client (OpenAI-compatible). Called **only from the server**, so the key never reaches the browser. |
 | UI | `src/App.jsx`, `src/review-ui.jsx` | React + Tailwind v4. |
 | Samples | `samples/`, `public/samples/` | `items_clean.csv`, `items_messy.csv`, `items_odd_headers.csv` (for AI header matching), `schema.json`. |

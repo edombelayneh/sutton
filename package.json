@@ -7,6 +7,7 @@
     "dev": "concurrently -k -n api,web -c blue,green \"node --watch server/index.js\" \"vite\"",
     "build": "vite build",
     "lint": "oxlint",
+    "employee": "node server/employees.js",
     "preview": "vite preview",
     "zip": "rm -f ../sutton-submission.zip && zip -rq ../sutton-submission.zip . -x 'node_modules/*' 'dist/*' '.env' '*.DS_Store' && echo 'Created ../sutton-submission.zip'"
   },

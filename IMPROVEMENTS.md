@@ -5,7 +5,7 @@ New entries are added only after the owner approves them.
 
 | # | Gap | Why it matters | Status |
 |---|-----|----------------|--------|
-| 1 | No login | Anyone who can open the app can import, edit or delete inventory, and nothing records who did it | Planned |
+| 1 | No login | Anyone who can open the app can import, edit or delete inventory, and nothing records who did it | Done |
 | 2 | No "imported by" record | You can't tell who imported a batch or filter imports by employee | Planned (needs #1) |
 | 3 | Multi-file uploads repeat headers and drop data | Headers are merged only when the text matches exactly, so `SKU`, `SKU ` and `sku` show up as separate rows on the Map step. Only one of them gets mapped to the SKU field, so the **other files' rows lose their SKU values** | Done |
 | 4 | Data is stored in JSON files | A JSON file doesn't scale, has no real queries or relations, and can't safely handle several users at once. Employees (#1) and audit data (#2) make this more pressing | Done |
@@ -20,6 +20,15 @@ New entries are added only after the owner approves them.
 - The server creates a session (httpOnly cookie). Every `/api/*` route except login requires a session.
 - There's a seed script for the first employees, because there is no sign-up page.
 - Employees live in an `employees` table in PostgreSQL (#4 is done).
+- **Done:**
+  - `migrations/003_auth.sql`: `employees` and `sessions` tables. Email and employee ID are unique regardless of case.
+  - `server/auth.js`: scrypt password hashes; a random 256-bit session token in an `HttpOnly; SameSite=Lax` cookie, lasting 12 hours; the database stores only a SHA-256 of each token.
+  - The same "wrong email/ID or password" message whether or not the account exists, with equal timing.
+  - Lockout after 5 failed attempts per account for 15 minutes (plus a 100-failure overall cap). Not per IP, because behind the Vite proxy everyone shares 127.0.0.1.
+  - `npm run employee -- add | password | deactivate | activate | list`. Passwords are typed at a hidden prompt. Changing a password or deactivating someone signs them out everywhere.
+  - App: sign-in screen; name and **Sign out** in the header; if a session expires, you're returned to sign-in with a note.
+  - Tested: 27 auth checks (every route locked, ID/email sign-in, logout, forged/expired tokens, lockout, deactivate) plus the 33 existing checks while signed in.
+- **Not yet:** no password reset by email (an admin runs `npm run employee -- password <id>`), and no HTTPS, so keep it on localhost until it's deployed behind TLS.
 
 ## 2. Imported by + filter
 - Each batch and each item records `imported_by: { id, name }`, taken from the session on the server (never trusted from the browser).

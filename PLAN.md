@@ -74,7 +74,7 @@ An ops admin. Not a developer. Used to Excel. Wants confidence, not JSON.
 
 ### Phase 5: Gaps (see IMPROVEMENTS.md), in this order
 - [x] 3. Multi-file headers: group by normalized name/field, one Map row per field, each file's rows map through their own header
-- [ ] 1. Real auth: employee store (hashed passwords, scrypt), seed script, login by email or employee ID, session cookie, protect `/api/*`
+- [x] 1. Real auth: employee store (hashed passwords, scrypt), seed script, login by email or employee ID, session cookie, protect `/api/*`
 - [ ] 2. `imported_by` / `updated_by` from the session on batches and items; "Imported by" column + filter on Imported items
 - [x] 6. Upload history + restore to before any upload (change log, `migrations/002_change_log.sql`)
 - [x] 4. Database: PostgreSQL + REST, plain SQL via `pg`, started empty (employees table comes with login)

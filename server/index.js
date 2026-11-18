@@ -3,6 +3,7 @@ import express from 'express'
 import { validateRows, parseRow, CATEGORIES, UOMS, FIELDS } from '../shared/schema.js'
 import { askJson } from './ai.js'
 import { pool, tx, migrate, fromRow, toValues, ITEM_COLUMNS } from './db.js'
+import { checkLogin, createSession, endSession, currentEmployee, readCookie, sessionCookie, clearedCookie, publicEmployee, isThrottled, noteFailure, clearFailures } from './auth.js'
 
 const PORT = process.env.API_PORT || 3001
 
@@ -10,7 +11,7 @@ const app = express()
 app.use(express.json({ limit: '20mb' }))
 
 // Wrap async routes so a database error becomes a clear JSON response instead of a hung request.
-const route = (fn) => (req, res) => fn(req, res).catch((e) => {
+const route = (fn) => (req, res, next) => fn(req, res, next).catch((e) => {
   if (e.code === '23505') return res.status(409).json({ errors: { sku: 'This SKU already exists in the system' } })
   if (e.code === '23514') return res.status(400).json({ error: `Rejected by the database (${e.constraint})` })
   console.error(e)
@@ -33,6 +34,38 @@ const logChange = (c, { batch_id = null, kind, sku, before, after }) =>
 const lockItems = (c) => c.query('LOCK TABLE items IN SHARE ROW EXCLUSIVE MODE')
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ai: Boolean(process.env.GROQ_API_KEY) }))
+
+// ---- Sign-in. Everything below the requireAuth line needs a signed-in employee. ----
+const LOGIN_ERROR = 'Wrong email/employee ID or password' // same message either way: don't reveal which accounts exist
+app.post('/api/auth/login', route(async (req, res) => {
+  const login = typeof req.body?.login === 'string' ? req.body.login.trim().slice(0, 200) : ''
+  const password = typeof req.body?.password === 'string' ? req.body.password.slice(0, 200) : ''
+  if (!login || !password) return res.status(400).json({ error: 'Enter your email or employee ID and your password' })
+  const keys = [`login:${login.toLowerCase()}`, 'all']
+  if (isThrottled(keys)) return res.status(429).json({ error: 'Too many failed attempts. Wait 15 minutes and try again.' })
+  const emp = await checkLogin(login, password)
+  if (!emp) { noteFailure(keys); return res.status(401).json({ error: LOGIN_ERROR }) }
+  clearFailures(keys)
+  res.setHeader('Set-Cookie', sessionCookie(await createSession(emp.id)))
+  res.json(publicEmployee(emp))
+}))
+app.post('/api/auth/logout', route(async (req, res) => {
+  await endSession(readCookie(req))
+  res.setHeader('Set-Cookie', clearedCookie())
+  res.json({ ok: true })
+}))
+app.get('/api/auth/me', route(async (req, res) => {
+  const emp = await currentEmployee(req)
+  if (!emp) return res.status(401).json({ error: 'Not signed in' })
+  res.json(publicEmployee(emp))
+}))
+const requireAuth = route(async (req, res, next) => {
+  const emp = await currentEmployee(req)
+  if (!emp) return res.status(401).json({ error: 'Please sign in' })
+  req.employee = emp
+  next()
+})
+app.use('/api', requireAuth)
 
 // All items already in the system.
 app.get('/api/items', route(async (_req, res) => {
@@ -260,7 +293,7 @@ Reply as {"mappings":[{"header":"<header>","field":"<field key or null>",${multi
   }
 })
 
-// Localhost only: no auth, so never expose the API (or the AI key's spend) to the network.
+// Localhost only. Sign-in protects the data, but there's no HTTPS here, so don't expose the API to the network as is.
 try {
   await migrate()
 } catch (e) {

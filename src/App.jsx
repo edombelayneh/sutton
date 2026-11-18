@@ -20,7 +20,7 @@ const fileToText = async (f) => {
 
 const STEPS = ['Upload', 'Map columns', 'Review & fix', 'Results']
 
-export default function App() {
+export default function App({ employee, onSignOut }) {
   const [step, setStep] = useState(0)
   const [fileName, setFileName] = useState('')
   const [columns, setColumns] = useState([]) // [{ name, files, variants }]
@@ -134,6 +134,16 @@ export default function App() {
           </ol>
           <button onClick={() => setShowItems(true)} className="shrink-0 px-3 py-1.5 rounded-full text-sm border border-slate-200 hover:bg-slate-50 md:ml-2">Imported items <span className="text-slate-400 tabular-nums">{existingSkus.size}</span></button>
           <span className="md:hidden ml-auto label text-slate-500">{String(step + 1).padStart(2, '0')} / {String(STEPS.length).padStart(2, '0')}</span>
+          {employee && (
+            <div className="shrink-0 flex items-center gap-2 text-sm">
+              <span className="hidden lg:block text-right leading-tight">
+                <span className="block font-medium">{employee.name}</span>
+                <span className="block text-xs text-slate-500">{employee.employee_id}</span>
+              </span>
+              <button className="px-3 py-1.5 rounded-full text-slate-600 hover:bg-slate-100" title={`Signed in as ${employee.name} (${employee.email})`}
+                onClick={() => { if ((step === 1 || step === 2) && !window.confirm('Sign out? Your changes to this import will be lost.')) return; onSignOut() }}>Sign out</button>
+            </div>
+          )}
         </div>
         <div className="h-0.5 bg-slate-100"><div className="h-full bg-gradient-to-r from-sky-400 via-violet-400 to-emerald-400 seg" style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} /></div>
       </header>
