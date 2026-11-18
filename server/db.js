@@ -11,7 +11,23 @@ const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..',
 pg.types.setTypeParser(pg.types.builtins.NUMERIC, (v) => (v === null ? null : Number(v)))
 pg.types.setTypeParser(pg.types.builtins.DATE, (v) => v)
 
-export const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL || 'postgres://localhost/sutton' })
+export const DATABASE_URL = process.env.DATABASE_URL || 'postgres://localhost/sutton'
+export const pool = new pg.Pool({ connectionString: DATABASE_URL })
+
+/** Create the database in `url` if it doesn't exist yet (connects to the server's "postgres" database to do it). */
+export async function ensureDatabase(url = DATABASE_URL) {
+  const target = new URL(url)
+  const name = decodeURIComponent(target.pathname.slice(1))
+  const admin = new pg.Client({ connectionString: Object.assign(new URL(url), { pathname: '/postgres' }).toString() })
+  await admin.connect()
+  try {
+    const exists = (await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [name])).rowCount
+    if (!exists) await admin.query(`CREATE DATABASE "${name.replace(/"/g, '""')}"`)
+    return !exists
+  } finally {
+    await admin.end()
+  }
+}
 
 /** Run fn(client) inside one transaction: everything is saved, or nothing is. */
 export async function tx(fn) {

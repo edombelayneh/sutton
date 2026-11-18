@@ -2,6 +2,12 @@
 
 Newest entries at the top.
 
+## One-command setup, and export what got in
+- **`npm run setup`** creates the database and tables and adds a demo account (`DEMO` / `try-sutton-123`). It's safe to re-run and never touches existing data or accounts. If Postgres isn't reachable, it explains how to start it (Homebrew or Docker). The README run steps are now four commands.
+- **Export:** the results page has **Download exactly what was saved** (just this import's items), and Imported items has **Download all / Download these** (respects search and filter). Both offer CSV in the brief's encoding (it imports back unchanged) or canonical JSON (`shared/export.js`).
+- 5 new tests, including an end-to-end round trip: import → export CSV → wipe → re-import gives identical items. 65 tests total.
+- Why: reviewers must be able to run it from the README without hand setup , and the admin needs proof of what got in that they can check against their spreadsheet (IMPROVEMENTS.md #7).
+
 ## Automated tests: `npm test`
 - **60 Vitest tests** in `tests/`: column mapping and multi-file merging (unit), plus API tests for import, edit/delete, the database's own rules, undo and restore-to-before, sign-in and lockout, "imported by", and the `npm run employee` script.
 - The API tests start the real server on a random port against a separate **`sutton_test`** database (created automatically). They refuse to run against a database whose name doesn't end in `_test`, and they never call the AI.

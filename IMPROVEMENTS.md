@@ -11,6 +11,7 @@ New entries are added only after the owner approves them.
 | 4 | Data is stored in JSON files | A JSON file doesn't scale, has no real queries or relations, and can't safely handle several users at once. Employees (#1) and audit data (#2) make this more pressing | Done |
 | 5 | No automated tests | Bugs like the multi-file SKU loss (#3) went unnoticed because nothing checks behavior automatically. Every change risks breaking import, auto-fix or validation without anyone knowing | Done |
 | 6 | No way back to an earlier upload | "Undo this import" only existed on the results page right after importing. Once you left, a bad upload (or the edits after it) couldn't be rolled back | Done |
+| 7 | No way to export what got in | "Know exactly what got imported" was only a list of SKUs. The admin couldn't take the result back to their spreadsheet to check it | Done |
 
 ---
 
@@ -77,7 +78,7 @@ These aren't alternatives. **PostgreSQL is a database** (it replaces the JSON fi
 - **Plan:** Vitest (it fits with Vite, so there's nothing extra to configure). Run with `npm test`.
 - **Cover first:** the pure logic in `shared/` (header mapping, `combineFiles`, validation, auto-fix) using the sample files, then the API routes (import, undo, update, and auth once #1 lands).
 - Every bug we fix gets a test that would have caught it.
-- **Done:** `npm test` (Vitest) runs 60 tests in about 3 seconds:
+- **Done:** `npm test` (Vitest) runs the tests in about 3 seconds (65 as of #7):
   - `tests/unit/columns.test.js`: column mapping and multi-file merging, including the regression test for #3 (the second file losing its SKUs).
   - `tests/api/items.test.js`: import, update, edit, delete, clear all, simultaneous imports, and the rules the database enforces.
   - `tests/api/history.test.js`: undo and "restore to before", including the regression test for items left behind after a restore.
@@ -93,3 +94,9 @@ These aren't alternatives. **PostgreSQL is a database** (it replaces the JSON fi
 - **How:** an `item_changes` log (`migrations/002_change_log.sql`) records every change to an item (import, update, edit, delete, rename) with its before and after values. Restoring replays it backwards. This replaced the old `batch_previous` table, so "Undo this import" on the results page uses the same mechanism.
 - Ready for "imported by" (#2): each upload row can show who did it.
 - Tested: 3 uploads, then an edit, a delete and a rename, then restore to before upload 2 → items identical to right after upload 1.
+
+## 7. Export what got in
+- **Results page:** a "What got in" card with **Download exactly what was saved: CSV · JSON**, holding just the items this import saved.
+- **Imported items:** **Download all / Download these** (respects the search and Imported by filter): CSV · JSON.
+- **CSV** uses the brief's encoding (schema columns, `;` tags, `true`/`false`, JSON cells), so an exported file **imports back unchanged** (tested end to end). **JSON** is the brief's canonical shape (nested objects and arrays, schema fields only).
+- Text cells that would run as spreadsheet formulas get a leading `'`, like the rejected-rows download.

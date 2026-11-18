@@ -4,26 +4,30 @@ A local web app that lets a warehouse operations admin bulk-import inventory ite
 
 ## Run it locally
 
-Requirements: **Node.js 20.19+ or 22.12+** (Vite 8's minimum; tested on Node 25), npm, and **PostgreSQL** (tested on 18).
+Requirements: **Node.js 20.19+ or 22.12+** (Vite 8's minimum; tested on Node 25), npm, and **PostgreSQL** (any recent version; tested on 18).
 
 ```bash
-brew install postgresql@18             # once (macOS; any Postgres works)
-brew services start postgresql@18      # keeps it running in the background
-createdb sutton                        # once
+# 1. PostgreSQL, if you don't have it running (pick one)
+brew install postgresql@18 && brew services start postgresql@18                                # macOS
+docker run -d --name sutton-pg -p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:18   # Docker*
+
+# 2. The app
 npm install
-npm run employee -- add --id E1001 --name "Your Name" --email you@company.com   # once: asks for a password
+npm run setup     # creates the database and tables, and adds a demo account (safe to re-run)
 npm run dev
 ```
 
-**Run the tests:** `npm test` (60 tests, about 3 seconds). They use a separate `sutton_test` database, created automatically, and never touch your data or call the AI.
+\*With Docker, first put `DATABASE_URL=postgres://postgres@localhost/sutton` in `.env` (`cp .env.example .env`).
 
-Sign in with your **email or employee ID** and the password you chose. There's no sign-up page: add, reset or block people with `npm run employee -- add | password <id> | deactivate <id> | activate <id> | list` (see `server/employees.js`).
+`npm run dev` starts the web app and the API together. The browser opens **http://localhost:5173** (the API is on port 3001).
 
-The server creates its tables on startup (`migrations/*.sql`). To use a different database, set `DATABASE_URL` in `.env` (default `postgres://localhost/sutton`).
+**Sign in** with employee ID **`DEMO`** (or `demo@example.com`) and password **`try-sutton-123`**. **Try it in 10 seconds:** click **Messy sample**, then **Continue**.
 
-This starts the web app and the API together. The browser opens **http://localhost:5173** (the API is on port 3001).
+Add real people (there's no sign-up page) with `npm run employee -- add --id E1001 --name "Your Name" --email you@company.com`, which asks for a password. Also: `password <id>`, `deactivate <id>`, `activate <id>`, `list` (see `server/employees.js`).
 
-**Try it in 10 seconds:** click **Messy sample** on the first screen, then **Continue**.
+**Run the tests:** `npm test` (about 3 seconds). They use a separate `sutton_test` database, created automatically, and never touch your data or call the AI.
+
+To use a different database, set `DATABASE_URL` in `.env` (default `postgres://localhost/sutton`).
 
 ### Optional: turn on AI
 
@@ -49,9 +53,9 @@ Restart `npm run dev` after adding the key. **Without a key everything works**; 
 - **A readable list, not a spreadsheet**: categories and units in words, `$` and thousands formatting, and a plain-English *"What's going on"* column. Click a row to open an **edit panel** with grouped fields. **No JSON is shown anywhere**: size is L × W × H plus a unit, and vendors are an editable list with a ★ for the one preferred vendor.
 - **Color = source of change**: 🟢 safe fix · 🟡 our guess · 🟣 AI · 🟠 duplicate · 🔴 needs you. Filter chips (*Needs attention*, *Duplicates*, *AI*, *Auto-fixed*, *All*) and a live "162 of 200 ready" bar show how close you are.
 
-**4. Import & results.** Only valid, confirmed rows import (partial import is intentional). The server **re-validates everything**. The results page leads with *"N items are in."*, lists what didn't import and why, offers **Download as CSV** of the rejected rows, and has **Undo this import** (removes what it added and restores anything it updated).
+**4. Import & results.** Only valid, confirmed rows import (partial import is intentional). The server **re-validates everything**. The results page leads with *"N items are in."*, lists what didn't import and why, offers **Download as CSV** of the rejected rows and **Download exactly what was saved** (CSV in the brief's encoding, which imports back unchanged, or canonical JSON), and has **Undo this import** (removes what it added and restores anything it updated).
 
-**Imported items.** A full-screen, searchable list of everything already in the system. Click an item to see all its details, **edit** it (re-validated with the same rules) or **delete** it (with a confirm). **Clear all** empties the store (confirmed). The **Upload history** tab lists every upload; **↶ Restore to before this** puts the inventory back exactly as it was before any of them. Header steps and the logo take you back, and ask first if you'd lose edits.
+**Imported items.** A full-screen, searchable list of everything already in the system. Click an item to see all its details, **edit** it (re-validated with the same rules) or **delete** it (with a confirm). **Download all / Download these** saves the list (respecting the search and filter) as CSV or JSON. **Clear all** empties the store (confirmed). The **Upload history** tab lists every upload; **↶ Restore to before this** puts the inventory back exactly as it was before any of them. Header steps and the logo take you back, and ask first if you'd lose edits.
 
 ## How it's built
 

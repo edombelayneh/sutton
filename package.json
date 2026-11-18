@@ -7,6 +7,7 @@
     "dev": "concurrently -k -n api,web -c blue,green \"node --watch server/index.js\" \"vite\"",
     "build": "vite build",
     "lint": "oxlint",
+    "setup": "node server/setup.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "employee": "node server/employees.js",

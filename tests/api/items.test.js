@@ -1,6 +1,9 @@
 // Import, update, edit, delete, clear: the core item API against a real (test) PostgreSQL.
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest'
 import { startServer, signedIn, resetData, loadSample, pool } from '../helpers.js'
+import Papa from 'papaparse'
+import { autoMapHeaders, applyMapping } from '../../shared/schema.js'
+import { itemsToCsv, toCanonical } from '../../shared/export.js'
 
 let server, api
 const messy = loadSample('items_messy.csv')
@@ -91,6 +94,20 @@ describe('edit and delete', () => {
     await api('DELETE', '/items')
     expect(await items()).toHaveLength(0)
     expect((await api('GET', '/batches')).data).toHaveLength(0)
+  })
+})
+
+describe('export what got in', () => {
+  it('exported CSV of the stored items re-imports into an empty system as identical items', async () => {
+    await api('POST', '/import', { rows: clean })
+    const first = await items()
+    const csv = itemsToCsv(first)
+    await api('DELETE', '/items')
+    const p = Papa.parse(csv, { header: true, skipEmptyLines: 'greedy' })
+    const mapping = autoMapHeaders(p.meta.fields)
+    const again = await api('POST', '/import', { rows: p.data.map((r) => applyMapping(r, mapping)) })
+    expect(again.data.imported).toHaveLength(25)
+    expect((await items()).map(toCanonical)).toEqual(first.map(toCanonical))
   })
 })
 

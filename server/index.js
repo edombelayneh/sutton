@@ -316,8 +316,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     await migrate()
   } catch (e) {
     console.error(`\nCan't reach the database (${e.code || e.message}).`)
-    console.error('Start Postgres with:  brew services start postgresql@18')
-    console.error('Create the database:  createdb sutton   (or set DATABASE_URL in .env)\n')
+    console.error('Start Postgres, then run:  npm run setup   (creates the database and a demo account)\n')
     process.exit(1)
   }
   app.listen(PORT, '127.0.0.1', () => console.log(`API listening on http://127.0.0.1:${PORT}`))

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
+import { itemsToCsv, itemsToJson } from '../shared/export.js'
 import { FIELDS, FIELD_KEYS, applyMapping, validateRows, parseRow, combineFiles, autoMapColumns, canMapColumn, mergeColumns, mergeByField } from '../shared/schema.js'
 import { autoFixRow, generateSku } from '../shared/autofix.js'
 import { createPortal } from 'react-dom'
@@ -787,6 +788,10 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
       {tab === 'history' ? <UploadHistory onRestored={() => { setSel(null); reload(); onChanged?.() }} /> : (
       <div className="flex-1 overflow-auto">
         <div className="max-w-6xl mx-auto px-6 py-6">
+        <div className="flex items-center gap-3 mb-3 text-sm text-slate-500">
+          <span>{items ? `${list.length} item${list.length === 1 ? '' : 's'} shown${q || who ? ` (filtered from ${items.length})` : ''}` : ''}</span>
+          <span className="ml-auto"><DownloadItems items={list} name={`inventory-${today()}`} label={q || who ? 'Download these' : 'Download all'} /></span>
+        </div>
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-white text-left text-xs text-slate-400 border-b border-slate-100">
@@ -902,6 +907,28 @@ function UploadHistory({ onRestored }) {
   )
 }
 
+// Save text as a file in the browser.
+function downloadText(filename, text, type) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([text], { type }))
+  a.download = filename
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+}
+const today = () => new Date().toISOString().slice(0, 10)
+// "Download CSV · JSON" for a list of items, in the brief's CSV encoding and canonical JSON shape.
+function DownloadItems({ items, name, label = 'Download' }) {
+  const off = !items?.length
+  const btn = 'px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:border-slate-400 disabled:opacity-40'
+  return (
+    <span className="inline-flex items-center gap-2 text-sm text-slate-600">
+      {label}
+      <button disabled={off} className={btn} onClick={() => downloadText(`${name}.csv`, itemsToCsv(items), 'text/csv')}>CSV</button>
+      <button disabled={off} className={btn} onClick={() => downloadText(`${name}.json`, itemsToJson(items), 'application/json')}>JSON</button>
+    </span>
+  )
+}
+
 const personLabel = (p) => (p ? `${p.name} (${p.employee_id})` : '–')
 // Dropdown of everyone who appears in `people` (deduped), plus "Everyone". value = employee db id as a string, '' = everyone.
 function PersonFilter({ people, value, onChange, label = 'Imported by' }) {
@@ -992,6 +1019,12 @@ function ItemDetail({ item: it, onClose, onEdit, onDelete }) {
 
 function Results({ result, onRestart, onViewItems }) {
   const [undone, setUndone] = useState(false)
+  // The items this import saved, as they are in the system now (for "Download what got in").
+  const [got, setGot] = useState(null)
+  useEffect(() => {
+    if (!result.batch || !result.imported.length) return
+    fetch('/api/items').then((r) => r.json()).then((all) => setGot(all.filter((it) => it.batch === result.batch))).catch(() => setGot([]))
+  }, [result.batch, result.imported.length])
   const undo = async () => {
     // Undo = restore to before this import, so warn if anything has changed since.
     const me = await fetch('/api/batches').then((r) => r.json()).then((l) => l.find((b) => b.id === result.batch)).catch(() => null)
@@ -1025,9 +1058,15 @@ function Results({ result, onRestart, onViewItems }) {
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm"><span className="label text-emerald-700">Imported</span><div className="text-5xl font-medium tracking-tight tabular-nums mt-2">{result.imported.length}</div></div>
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm"><span className="label text-red-600">Not imported</span><div className="text-5xl font-medium tracking-tight tabular-nums mt-2">{skipped.length + result.rejected.length}</div></div>
       </div>
-      {result.imported.length > 0 && (
-        <details className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm"><summary className="cursor-pointer font-medium">Imported SKUs</summary>
-          <p className="font-mono text-xs mt-2">{result.imported.join(', ')}</p></details>
+      {result.imported.length > 0 && !undone && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h3 className="font-medium">What got in</h3>
+            <span className="ml-auto"><DownloadItems items={got} name={`imported-${today()}`} label="Download exactly what was saved" /></span>
+          </div>
+          <details><summary className="cursor-pointer text-sm text-slate-600">Show the {result.imported.length} imported SKUs</summary>
+            <p className="font-mono text-xs mt-2">{result.imported.join(', ')}</p></details>
+        </div>
       )}
       {skipped.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2">
