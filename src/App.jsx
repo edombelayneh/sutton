@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
-import { itemsToCsv, itemsToJson } from '../shared/export.js'
+import { itemsToCsv, itemsToJson, EXPORT_COLUMNS, REQUIRED_KEYS } from '../shared/export.js'
 import { FIELDS, FIELD_KEYS, applyMapping, validateRows, parseRow, combineFiles, autoMapColumns, canMapColumn, mergeColumns, mergeByField } from '../shared/schema.js'
 import { autoFixRow, generateSku } from '../shared/autofix.js'
 import { createPortal } from 'react-dom'
@@ -917,14 +917,95 @@ function downloadText(filename, text, type) {
 }
 const today = () => new Date().toISOString().slice(0, 10)
 // "Download CSV · JSON" for a list of items, in the brief's CSV encoding and canonical JSON shape.
+// "Download…" opens a panel: pick CSV or JSON and which columns. The choice is remembered for next time.
+const FIELD_COLS = EXPORT_COLUMNS.filter((c) => FIELD_KEYS.includes(c.key))
+const AUDIT_COLS = EXPORT_COLUMNS.filter((c) => !FIELD_KEYS.includes(c.key))
+const PREFS_KEY = 'sutton.download'
+const loadPrefs = () => {
+  try {
+    const p = JSON.parse(localStorage.getItem(PREFS_KEY))
+    const cols = p.columns.filter((k) => EXPORT_COLUMNS.some((c) => c.key === k))
+    if (cols.length) return { format: p.format === 'json' ? 'json' : 'csv', columns: cols }
+  } catch { /* nothing saved yet */ }
+  return { format: 'csv', columns: [...FIELD_KEYS] }
+}
 function DownloadItems({ items, name, label = 'Download' }) {
-  const off = !items?.length
-  const btn = 'px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:border-slate-400 disabled:opacity-40'
+  const [open, setOpen] = useState(false)
+  const [prefs, setPrefs] = useState(loadPrefs)
+  const ref = useRef(null)
+  const radioName = useId()
+  useEffect(() => {
+    if (!open) return
+    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false) }
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc) }
+  }, [open])
+  const save = (next) => { setPrefs(next); localStorage.setItem(PREFS_KEY, JSON.stringify(next)) }
+  const has = (k) => prefs.columns.includes(k)
+  const toggle = (k) => save({ ...prefs, columns: has(k) ? prefs.columns.filter((x) => x !== k) : [...prefs.columns, k] })
+  const setCols = (cols) => save({ ...prefs, columns: cols })
+  const missingRequired = REQUIRED_KEYS.filter((k) => !has(k))
+  const go = () => {
+    if (prefs.format === 'csv') downloadText(`${name}.csv`, itemsToCsv(items, prefs.columns), 'text/csv')
+    else downloadText(`${name}.json`, itemsToJson(items, prefs.columns), 'application/json')
+    setOpen(false)
+  }
+  const check = (c) => (
+    <label key={c.key} className="flex items-center gap-2 py-1 cursor-pointer select-none">
+      <input type="checkbox" className="accent-slate-900" checked={has(c.key)} onChange={() => toggle(c.key)} />
+      <span>{c.label}{c.required && <span className="text-slate-400"> *</span>}</span>
+    </label>
+  )
+  const linkBtn = 'text-xs text-slate-500 hover:text-slate-900 underline-offset-2 hover:underline'
   return (
-    <span className="inline-flex items-center gap-2 text-sm text-slate-600">
-      {label}
-      <button disabled={off} className={btn} onClick={() => downloadText(`${name}.csv`, itemsToCsv(items), 'text/csv')}>CSV</button>
-      <button disabled={off} className={btn} onClick={() => downloadText(`${name}.json`, itemsToJson(items), 'application/json')}>JSON</button>
+    <span ref={ref} className="relative inline-block text-sm">
+      <button disabled={!items?.length} onClick={() => setOpen(!open)} aria-expanded={open}
+        className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-slate-400 disabled:opacity-40">
+        ⬇ {label}…
+      </button>
+      {open && (
+        <div role="dialog" aria-label="Download options" className="absolute right-0 mt-2 w-[420px] max-w-[90vw] z-40 bg-white rounded-xl border border-slate-200 shadow-xl p-4 space-y-3 text-slate-800 text-left">
+          <div className="flex items-center gap-3">
+            <span className="font-medium">Format</span>
+            {[['csv', 'CSV (spreadsheet)'], ['json', 'JSON']].map(([f, l]) => (
+              <label key={f} className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name={radioName} className="accent-slate-900" checked={prefs.format === f} onChange={() => save({ ...prefs, format: f })} />{l}
+              </label>
+            ))}
+          </div>
+          <div>
+            <div className="flex items-center gap-3 mb-1">
+              <span className="font-medium">Columns</span>
+              <span className="text-xs text-slate-400">{prefs.columns.length} of {EXPORT_COLUMNS.length}</span>
+              <span className="ml-auto flex gap-3">
+                <button className={linkBtn} onClick={() => setCols(EXPORT_COLUMNS.map((c) => c.key))}>All</button>
+                <button className={linkBtn} onClick={() => setCols([...FIELD_KEYS])}>Item fields only</button>
+                <button className={linkBtn} onClick={() => setCols([])}>None</button>
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4">
+              {FIELD_COLS.map(check)}
+            </div>
+            <div className="text-xs font-medium text-slate-500 mt-2 mb-0.5">Audit (who and when)</div>
+            <div className="grid grid-cols-2 gap-x-4">
+              {AUDIT_COLS.map(check)}
+            </div>
+          </div>
+          {prefs.columns.length > 0 && missingRequired.length > 0 && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Without {missingRequired.map((k) => EXPORT_COLUMNS.find((c) => c.key === k).label).join(', ')}, this file can't be imported back as is. * = required to import.
+            </p>
+          )}
+          <div className="flex items-center gap-2 pt-1">
+            <span className="text-xs text-slate-500">{items.length} item{items.length === 1 ? '' : 's'}</span>
+            <button className="ml-auto text-sm text-slate-500 hover:text-slate-900" onClick={() => setOpen(false)}>Cancel</button>
+            <button disabled={!prefs.columns.length} onClick={go}
+              className="px-4 py-2 rounded-lg bg-slate-900 text-white font-medium hover:bg-slate-800 disabled:opacity-40">Download {prefs.format.toUpperCase()}</button>
+          </div>
+        </div>
+      )}
     </span>
   )
 }

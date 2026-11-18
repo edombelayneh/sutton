@@ -78,7 +78,7 @@ These aren't alternatives. **PostgreSQL is a database** (it replaces the JSON fi
 - **Plan:** Vitest (it fits with Vite, so there's nothing extra to configure). Run with `npm test`.
 - **Cover first:** the pure logic in `shared/` (header mapping, `combineFiles`, validation, auto-fix) using the sample files, then the API routes (import, undo, update, and auth once #1 lands).
 - Every bug we fix gets a test that would have caught it.
-- **Done:** `npm test` (Vitest) runs the tests in about 3 seconds (65 as of #7):
+- **Done:** `npm test` (Vitest) runs the tests in about 3 seconds (69 as of #7):
   - `tests/unit/columns.test.js`: column mapping and multi-file merging, including the regression test for #3 (the second file losing its SKUs).
   - `tests/api/items.test.js`: import, update, edit, delete, clear all, simultaneous imports, and the rules the database enforces.
   - `tests/api/history.test.js`: undo and "restore to before", including the regression test for items left behind after a restore.
@@ -100,3 +100,4 @@ These aren't alternatives. **PostgreSQL is a database** (it replaces the JSON fi
 - **Imported items:** **Download all / Download these** (respects the search and Imported by filter): CSV · JSON.
 - **CSV** uses the brief's encoding (schema columns, `;` tags, `true`/`false`, JSON cells), so an exported file **imports back unchanged** (tested end to end). **JSON** is the brief's canonical shape (nested objects and arrays, schema fields only).
 - Text cells that would run as spreadsheet formulas get a leading `'`, like the rejected-rows download.
+- **Choose columns:** **Download…** opens a panel to pick CSV or JSON and which columns: any schema field, plus audit columns (Imported by/at, Last edited by/at). Shortcuts: All / Item fields only / None. The choice is remembered for next time. If a required field is left out, the panel warns that the file can't be imported back as is.

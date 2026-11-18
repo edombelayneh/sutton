@@ -2,6 +2,13 @@
 
 Newest entries at the top.
 
+## Download: choose your columns
+- **Download…** now opens a panel: pick **CSV or JSON** and **which columns**. That's any schema field, plus audit columns (**Imported by / at, Last edited by / at**) as "Name (ID)" in CSV and `{ employee_id, name }` in JSON. Shortcuts: All / Item fields only / None. The choice is remembered.
+- A warning appears when a required field is left out, because that file can't be imported back as is.
+- Columns always come out in schema order, whatever order you tick them.
+- Fixed while testing: `items.map(toCanonical)` passed the array index as the column list. Export functions now treat anything that isn't a list as "all schema fields".
+- Why: the owner wanted the admin to pick the columns they download. 4 new tests (69 total).
+
 ## One-command setup, and export what got in
 - **`npm run setup`** creates the database and tables and adds a demo account (`DEMO` / `try-sutton-123`). It's safe to re-run and never touches existing data or accounts. If Postgres isn't reachable, it explains how to start it (Homebrew or Docker). The README run steps are now four commands.
 - **Export:** the results page has **Download exactly what was saved** (just this import's items), and Imported items has **Download all / Download these** (respects search and filter). Both offer CSV in the brief's encoding (it imports back unchanged) or canonical JSON (`shared/export.js`).
