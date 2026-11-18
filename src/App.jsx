@@ -537,7 +537,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
     setBusy(true)
     const readyRows = rows.filter((_, i) => status[i].ready)
     const res = await fetch('/api/import', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: readyRows.map(clean), updates: readyRows.filter((r) => r._update).map((r) => r.sku.trim()) }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows: readyRows.map(clean), updates: readyRows.filter((r) => r._update).map((r) => r.sku.trim()), files: [...new Set(rows.map((r) => r._file).filter(Boolean))] }),
     }).then((r) => r.json())
     const skipped = rows.map((r, i) => ({ r, i })).filter(({ i }) => !status[i].ready)
       .map(({ r, i }) => ({
@@ -714,6 +714,7 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
   const [sel, setSel] = useState(null)
   const [editing, setEditing] = useState(null) // raw-string row being edited
   const [serverErr, setServerErr] = useState({})
+  const [tab, setTab] = useState('items')
   const reload = () => fetch('/api/items').then((r) => r.json()).then(setItems).catch(() => setItems([]))
   useEffect(() => { reload() }, [])
 
@@ -727,7 +728,7 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
     dimensions: it.dimensions ? JSON.stringify(it.dimensions) : '', vendors: it.vendors?.length ? JSON.stringify(it.vendors) : '',
   })
   const clearAll = async () => {
-    if (!window.confirm(`Delete ALL ${items.length} imported items from the system? This can't be undone, and past imports can no longer be undone.`)) return
+    if (!window.confirm(`Delete ALL ${items.length} imported items from the system? This can't be undone, and the upload history is cleared too.`)) return
     await fetch('/api/items', { method: 'DELETE' })
     setSel(null); reload(); onChanged?.()
   }
@@ -758,12 +759,19 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
             <div className="text-xl font-semibold tracking-tight">Imported items</div>
             <div className="text-xs text-slate-500">{items ? `${items.length} items in the system · click any item to view, edit or delete` : 'Loading…'}</div>
           </div>
-          <input autoFocus placeholder="Search SKU or name…" value={q} onChange={(e) => setQ(e.target.value)}
-            className="ml-auto w-72 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-          {items?.length > 0 && <button className="px-3 py-2 rounded-lg border border-red-200 text-red-600 text-sm hover:bg-red-50" onClick={clearAll}>Clear all</button>}
-          <button className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800" onClick={onImportAnother}>Import another file</button>
+          <div className="flex rounded-lg bg-slate-100 p-1 text-sm" role="tablist">
+            {[['items', 'Items'], ['history', 'Upload history']].map(([k, label]) => (
+              <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+                className={`px-3 py-1.5 rounded-md transition-colors ${tab === k ? 'bg-white shadow-sm font-medium text-slate-900' : 'text-slate-500 hover:text-slate-900'}`}>{label}</button>
+            ))}
+          </div>
+          {tab === 'items' && <input autoFocus placeholder="Search SKU or name…" value={q} onChange={(e) => setQ(e.target.value)}
+            className="ml-auto w-72 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />}
+          {tab === 'items' && items?.length > 0 && <button className="px-3 py-2 rounded-lg border border-red-200 text-red-600 text-sm hover:bg-red-50" onClick={clearAll}>Clear all</button>}
+          <button className={`${tab === 'history' ? 'ml-auto ' : ''}px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800`} onClick={onImportAnother}>Import another file</button>
         </div>
       </header>
+      {tab === 'history' ? <UploadHistory onRestored={() => { setSel(null); reload(); onChanged?.() }} /> : (
       <div className="flex-1 overflow-auto">
         <div className="max-w-6xl mx-auto px-6 py-6">
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
@@ -792,6 +800,7 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
         </div>
         </div>
       </div>
+      )}
       {sel && !editing && <ItemDetail item={sel} onClose={() => setSel(null)} onEdit={() => { setServerErr({}); setEditing(toRaw(sel)) }} onDelete={() => del(sel)} />}
       {editing && (
         <EditPanel i={0} title={`Editing ${sel.sku}`} row={editing} errors={editErrors}
@@ -808,6 +817,68 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
       )}
     </div>,
     document.body,
+  )
+}
+
+// Every upload, newest first. "Restore to before this" puts the inventory back exactly as it was
+// before that upload: it undoes that upload, every later one, and any edits/deletes made since.
+function UploadHistory({ onRestored }) {
+  const [list, setList] = useState(null)
+  const [busy, setBusy] = useState(null)
+  const [msg, setMsg] = useState('')
+  const load = () => fetch('/api/batches').then((r) => r.json()).then(setList).catch(() => setList([]))
+  useEffect(() => { load() }, [])
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
+  const restore = async (b) => {
+    const also = [b.later_uploads && plural(b.later_uploads, 'later upload'), b.later_edits && plural(b.later_edits, 'edit or delete') + ' made since'].filter(Boolean)
+    if (!window.confirm(`Go back to how the inventory was before the upload of ${new Date(b.imported_at).toLocaleString()}?\n\n`
+      + `This undoes that upload${also.length ? `, plus ${also.join(' and ')}` : ''}. This can't be undone.`)) return
+    setBusy(b.id); setMsg('')
+    const r = await fetch(`/api/batches/${encodeURIComponent(b.id)}/restore`, { method: 'POST' })
+    const data = await r.json().catch(() => ({}))
+    setBusy(null)
+    setMsg(r.ok ? `Restored. ${plural(data.uploadsUndone, 'upload')} undone.` : data.error || 'Restore failed')
+    load(); if (r.ok) onRestored?.()
+  }
+  return (
+    <div className="flex-1 overflow-auto">
+      <div className="max-w-6xl mx-auto px-6 py-6 space-y-3">
+        <p className="text-sm text-slate-600">Every upload, newest first. <b>Restore to before this</b> puts the inventory back exactly as it was before that upload.</p>
+        {msg && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 text-sm text-emerald-900">{msg}</div>}
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs text-slate-400 border-b border-slate-100">
+              <tr><th className="py-3 pl-6 pr-3 font-medium">Uploaded</th><th className="px-3 font-medium">Files</th><th className="px-3 font-medium">Result</th><th className="px-3 pr-6" /></tr>
+            </thead>
+            <tbody>
+              {(list || []).map((b, i) => (
+                <tr key={b.id} className="border-b border-slate-50 align-top">
+                  <td className="py-3 pl-6 pr-3 whitespace-nowrap">
+                    <div>{new Date(b.imported_at).toLocaleString()}</div>
+                    {i === 0 && <div className="text-xs text-slate-400">Latest</div>}
+                  </td>
+                  <td className="px-3 py-3 font-mono text-xs text-slate-600">{b.files.length ? b.files.join(', ') : '–'}</td>
+                  <td className="px-3 py-3 text-xs">
+                    <span className="text-emerald-700">{b.added} added</span>
+                    {b.updated > 0 && <span className="text-sky-700"> · {b.updated} updated</span>}
+                    {b.rejected > 0 && <span className="text-slate-500"> · {b.rejected} not imported</span>}
+                  </td>
+                  <td className="px-3 pr-6 py-2 text-right">
+                    <button disabled={busy !== null} onClick={() => restore(b)} title={
+                      b.later_uploads || b.later_edits ? `Also undoes ${[b.later_uploads && plural(b.later_uploads, 'later upload'), b.later_edits && plural(b.later_edits, 'edit or delete')].filter(Boolean).join(' and ')}` : 'Undoes just this upload'}
+                      className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:border-red-300 hover:text-red-700 hover:bg-red-50 disabled:opacity-40 whitespace-nowrap">
+                      {busy === b.id ? 'Restoring…' : '↶ Restore to before this'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {list && list.length === 0 && <tr><td colSpan={4} className="p-10 text-center text-slate-500">No uploads yet.</td></tr>}
+              {!list && <tr><td colSpan={4} className="p-10 text-center text-slate-500">Loading…</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -884,9 +955,13 @@ function ItemDetail({ item: it, onClose, onEdit, onDelete }) {
 function Results({ result, onRestart, onViewItems }) {
   const [undone, setUndone] = useState(false)
   const undo = async () => {
-    if (!window.confirm(`Undo this import? ${result.imported.length} items will be removed${result.updated ? ` and ${result.updated} updated items restored` : ''}.`)) return
+    // Undo = restore to before this import, so warn if anything has changed since.
+    const me = await fetch('/api/batches').then((r) => r.json()).then((l) => l.find((b) => b.id === result.batch)).catch(() => null)
+    const since = [me?.later_uploads && `${me.later_uploads} later upload${me.later_uploads > 1 ? 's' : ''}`, me?.later_edits && `${me.later_edits} edit${me.later_edits > 1 ? 's' : ''}/delete${me.later_edits > 1 ? 's' : ''} made since`].filter(Boolean)
+    if (!window.confirm(`Undo this import? ${result.imported.length} items will be removed${result.updated ? ` and ${result.updated} updated items restored` : ''}.${since.length ? `\n\nThis also undoes ${since.join(' and ')}.` : ''}`)) return
     const r = await fetch(`/api/import/${result.batch}/undo`, { method: 'POST' })
     if (r.ok) setUndone(true)
+    else window.alert((await r.json().catch(() => ({}))).error || 'Undo failed')
   }
   const skipped = result.sent.skipped
   const downloadSkipped = () => {

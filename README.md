@@ -4,12 +4,17 @@ A local web app that lets a warehouse operations admin bulk-import inventory ite
 
 ## Run it locally
 
-Requirements: **Node.js 20.19+ or 22.12+** (Vite 8's minimum; tested on Node 25) and npm.
+Requirements: **Node.js 20.19+ or 22.12+** (Vite 8's minimum; tested on Node 25), npm, and **PostgreSQL** (tested on 18).
 
 ```bash
+brew install postgresql@18             # once (macOS; any Postgres works)
+brew services start postgresql@18      # keeps it running in the background
+createdb sutton                        # once
 npm install
 npm run dev
 ```
+
+The server creates its tables on startup (`migrations/*.sql`). To use a different database, set `DATABASE_URL` in `.env` (default `postgres://localhost/sutton`).
 
 This starts the web app and the API together. The browser opens **http://localhost:5173** (the API is on port 3001).
 
@@ -41,7 +46,7 @@ Restart `npm run dev` after adding the key. **Without a key everything works**; 
 
 **4. Import & results.** Only valid, confirmed rows import (partial import is intentional). The server **re-validates everything**. The results page leads with *"N items are in."*, lists what didn't import and why, offers **Download as CSV** of the rejected rows, and has **Undo this import** (removes what it added and restores anything it updated).
 
-**Imported items.** A full-screen, searchable list of everything already in the system. Click an item to see all its details, **edit** it (re-validated with the same rules) or **delete** it (with a confirm). **Clear all** empties the store (confirmed). Header steps and the logo take you back, and ask first if you'd lose edits.
+**Imported items.** A full-screen, searchable list of everything already in the system. Click an item to see all its details, **edit** it (re-validated with the same rules) or **delete** it (with a confirm). **Clear all** empties the store (confirmed). The **Upload history** tab lists every upload; **↶ Restore to before this** puts the inventory back exactly as it was before any of them. Header steps and the logo take you back, and ask first if you'd lose edits.
 
 ## How it's built
 
@@ -49,12 +54,12 @@ Restart `npm run dev` after adding the key. **Without a key everything works**; 
 |---|---|---|
 | Validation rules | `shared/schema.js` | One module used by **both** the browser (instant feedback) and the server (source of truth). All field rules plus cross-row rules (unique SKU in the file *and* the store, ≤ 1 preferred vendor, discontinued ⇒ inactive). |
 | Safe auto-fixes | `shared/autofix.js` | Deterministic; each fix records `from`, `to`, `why` and whether it's a guess. Also the SKU generator. |
-| API + store | `server/index.js` | Express. `GET/DELETE /api/items`, `POST /api/import`, `POST /api/import/:batch/undo`, `PUT/DELETE /api/items/:sku`, `POST /api/ai/map`, `POST /api/ai/suggest`. Items are stored in `data/items.json` (plus `data/batches.json` for undo), written atomically, gitignored. The API listens on **127.0.0.1 only**. |
+| API + store | `server/index.js` | Express. `GET/DELETE /api/items`, `POST /api/import`, `POST /api/import/:batch/undo`, `GET /api/batches`, `POST /api/batches/:id/restore`, `PUT/DELETE /api/items/:sku`, `POST /api/ai/map`, `POST /api/ai/suggest`. Items are stored in **PostgreSQL** (`server/db.js`, schema in `migrations/`). Each import and each undo runs as **one transaction**, and the database also enforces the schema rules (SKU format, categories, cost ≥ 0, discontinued ⇒ inactive, unique SKU). The API listens on **127.0.0.1 only**. |
 | AI client | `server/ai.js` | A small Groq client (OpenAI-compatible). Called **only from the server**, so the key never reaches the browser. |
 | UI | `src/App.jsx`, `src/review-ui.jsx` | React + Tailwind v4. |
 | Samples | `samples/`, `public/samples/` | `items_clean.csv`, `items_messy.csv`, `items_odd_headers.csv` (for AI header matching), `schema.json`. |
 
-Stack: **Vite + React + Tailwind v4 + Express**. It was chosen for near-zero setup: two commands to run, no database to install.
+Stack: **Vite + React + Tailwind v4 + Express**. Data lives in **PostgreSQL** (plain SQL through `pg`, no ORM).
 
 ## What works / what doesn't yet
 
@@ -66,7 +71,6 @@ Stack: **Vite + React + Tailwind v4 + Express**. It was chosen for near-zero set
 - **Excel: first sheet only.** Updating an existing item shows a chip, not a field-by-field before → after diff yet.
 - **Ambiguous dates** assume US `MM/DD/YYYY` (flagged for the user to confirm); there's no locale setting.
 - **Large files**: the review list renders every row in the current filter. It's fine at hundreds of rows; thousands would need virtualization.
-- **Storage is a JSON file** (atomic writes, but no locking between simultaneous requests), which is fine for one local admin but isn't a database.
 - **Security:** there's no login; the API is bound to localhost so only this machine can reach it. Rejected-rows CSV exports are formula-safe, and the Excel parser is the patched SheetJS 0.20.3.
 - **Ask AI** sends at most 200 rows per request (ask again for more).
 - No automated test suite yet; testing was by script checks against the samples plus hands-on browser testing (see below).
@@ -96,4 +100,4 @@ Built in one hour, pairing with **Claude Code** (Claude Opus 5.5) as the agent:
 npm run zip
 ```
 
-Creates `../sutton-submission.zip` with the source and the `.git` folder. It leaves out `node_modules`, `dist`, `data/` (your local store) and `.env` (your API key).
+Creates `../sutton-submission.zip` with the source and the `.git` folder. It leaves out `node_modules`, `dist`, `data/` (old JSON files from before the database) and `.env` (your API key).

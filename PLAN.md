@@ -13,7 +13,7 @@ An ops admin. Not a developer. Used to Excel. Wants confidence, not JSON.
 
 ## Decisions
 - **Stack:** Vite + React + Tailwind (frontend) + Express (`server/`). One `npm run dev` starts both.
-- **Existing records:** stored in a JSON file (`data/items.json`). SKU uniqueness is checked against the file **and** the store.
+- **Existing records:** stored in PostgreSQL (`server/db.js`, `migrations/`), plain SQL with `pg`. Imports and undo are transactions. SKU uniqueness is checked against the file **and** the database. (Was `data/items.json` before Phase 5; we started the database empty.)
 - **AI:** Groq via `server/ai.js`, server-side only. Key in `.env` (`GROQ_API_KEY`, never committed). The app works fully without a key; only the AI features turn off.
 - **Validation lives in `shared/`**, so the browser gives instant feedback and the server re-checks on import (the server is the source of truth).
 
@@ -76,7 +76,8 @@ An ops admin. Not a developer. Used to Excel. Wants confidence, not JSON.
 - [x] 3. Multi-file headers: group by normalized name/field, one Map row per field, each file's rows map through their own header
 - [ ] 1. Real auth: employee store (hashed passwords, scrypt), seed script, login by email or employee ID, session cookie, protect `/api/*`
 - [ ] 2. `imported_by` / `updated_by` from the session on batches and items; "Imported by" column + filter on Imported items
-- [ ] 4. Database: discuss pros and cons first (leaning PostgreSQL + REST), then migrate items, batches and employees
+- [x] 6. Upload history + restore to before any upload (change log, `migrations/002_change_log.sql`)
+- [x] 4. Database: PostgreSQL + REST, plain SQL via `pg`, started empty (employees table comes with login)
 
 ## Time checkpoints
 | Time | Target |

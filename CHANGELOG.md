@@ -2,6 +2,21 @@
 
 Newest entries at the top.
 
+## Upload history: restore to before any upload
+- **Imported items** now has **Items | Upload history** tabs. History shows every upload (time, file names, added / updated / not imported) with **↶ Restore to before this**.
+- Restoring puts the inventory back **exactly** as it was before that upload: it undoes that upload, every later upload, and any edits, deletes or renames made since. The confirm dialog lists what else gets undone. "Undo this import" on the results page does the same and warns if anything changed since.
+- How: a new `item_changes` log records each change with before/after values (`migrations/002_change_log.sql`), replayed backwards in one transaction. It replaces `batch_previous`. Imports now send their file names.
+- Why: the owner noticed there was no way to go back to a prior version once you left the results page (IMPROVEMENTS.md #6).
+- **Fix:** restoring also deletes items that belong to the undone uploads but have no change-log record (uploads made before the log existed). Before, those items were left behind after a restore, which is what the owner hit.
+
+## Storage: JSON files → PostgreSQL
+- Items and import history now live in **PostgreSQL** (`server/db.js`, `migrations/001_init.sql`), accessed with plain SQL through `pg`. Migrations run when the server starts.
+- **Imports and undo are transactions**: a crash halfway can't leave half an import. Imports run one at a time, so the same new SKU can't get in twice.
+- **The database enforces the rules too** (SKU format, unique SKU, categories, units, cost ≥ 0, discontinued ⇒ inactive), as a last line of defense behind `shared/schema.js`.
+- The API and the shape of the items it returns are unchanged, so the frontend needed no changes.
+- Started with an empty database, as the owner chose. The old `data/*.json` files are left on disk but no longer used.
+- Why: gap #4 in IMPROVEMENTS.md. Login (#1) and "imported by" (#2) need real tables and safe saves with several users at once.
+
 ## Multiple files: AI merges columns that mean the same thing
 - On top of merging by spelling, columns from different files now merge when they **map to the same field** (`SKU` and `Item Code`), or when **AI judges they hold the same data**, based on the header and sample values (`Part #` = `SKU`, `Grp` = `Category`, `Std Cost` = `Unit Cost ($)`).
 - The Map step shows each merge: ✓ green when we matched it ourselves, 🤖 purple with the AI's reason. Two columns from the same file are never merged.

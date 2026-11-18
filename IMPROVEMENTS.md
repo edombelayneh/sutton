@@ -8,8 +8,9 @@ New entries are added only after the owner approves them.
 | 1 | No login | Anyone who can open the app can import, edit or delete inventory, and nothing records who did it | Planned |
 | 2 | No "imported by" record | You can't tell who imported a batch or filter imports by employee | Planned (needs #1) |
 | 3 | Multi-file uploads repeat headers and drop data | Headers are merged only when the text matches exactly, so `SKU`, `SKU ` and `sku` show up as separate rows on the Map step. Only one of them gets mapped to the SKU field, so the **other files' rows lose their SKU values** | Done |
-| 4 | Data is stored in JSON files | A JSON file doesn't scale, has no real queries or relations, and can't safely handle several users at once. Employees (#1) and audit data (#2) make this more pressing | Planned (decide first) |
+| 4 | Data is stored in JSON files | A JSON file doesn't scale, has no real queries or relations, and can't safely handle several users at once. Employees (#1) and audit data (#2) make this more pressing | Done |
 | 5 | No automated tests | Bugs like the multi-file SKU loss (#3) went unnoticed because nothing checks behavior automatically. Every change risks breaking import, auto-fix or validation without anyone knowing | Planned |
+| 6 | No way back to an earlier upload | "Undo this import" only existed on the results page right after importing. Once you left, a bad upload (or the edits after it) couldn't be rolled back | Done |
 
 ---
 
@@ -47,10 +48,23 @@ These aren't alternatives. **PostgreSQL is a database** (it replaces the JSON fi
 | SQLite + current REST API | Most of the Postgres benefits with no server (it's a single file), easiest move from JSON | Weaker under many writers at once, and you'd likely move to Postgres later |
 | PostgreSQL + GraphQL | Clients ask for exactly the fields they need, one typed schema | Much more setup (schema, resolvers), and our few simple endpoints don't need it. Mostly cost for little gain here |
 
-**Leaning:** PostgreSQL with the existing REST API. To be decided together before building.
+**Decision:** PostgreSQL with the existing REST API, plain SQL through `pg` (no ORM), starting with an empty database.
+
+**Done:**
+- Tables `items`, `import_batches` and `batch_previous` (what an import replaced, so undo can restore it), in `migrations/001_init.sql`. Migrations run automatically on server start.
+- The database enforces the schema rules too: SKU format, unique SKU, category and unit lists, cost ≥ 0, whole-number quantities, discontinued ⇒ inactive.
+- Each import and each undo is one transaction (all or nothing), and imports run one at a time, so two people importing the same new SKU at once can't both get in.
+- Tested with 20 API checks against a separate `sutton_test` database.
 
 ## 5. Automated tests
 - **Why:** the multi-file bug (#3) silently dropped SKUs, and only a manual check caught it. Tests would have caught it on the first run.
 - **Plan:** Vitest (it fits with Vite, so there's nothing extra to configure). Run with `npm test`.
 - **Cover first:** the pure logic in `shared/` (header mapping, `combineFiles`, validation, auto-fix) using the sample files, then the API routes (import, undo, update, and auth once #1 lands).
 - Every bug we fix gets a test that would have caught it.
+
+## 6. Upload history + "Restore to before this"
+- **Imported items → Upload history** tab lists every upload, newest first: when, which files, how many were added, updated and not imported.
+- **↶ Restore to before this** puts the inventory back **exactly** as it was before that upload. That upload, every later upload, and any edits or deletes made since are all undone, in one transaction. The confirm dialog says what else will be undone.
+- **How:** an `item_changes` log (`migrations/002_change_log.sql`) records every change to an item (import, update, edit, delete, rename) with its before and after values. Restoring replays it backwards. This replaced the old `batch_previous` table, so "Undo this import" on the results page uses the same mechanism.
+- Ready for "imported by" (#2): each upload row can show who did it.
+- Tested: 3 uploads, then an edit, a delete and a rename, then restore to before upload 2 → items identical to right after upload 1.

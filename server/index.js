@@ -1,115 +1,167 @@
 import 'dotenv/config'
 import express from 'express'
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { validateRows, parseRow, CATEGORIES, UOMS, FIELDS } from '../shared/schema.js'
 import { askJson } from './ai.js'
+import { pool, tx, migrate, fromRow, toValues, ITEM_COLUMNS } from './db.js'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = path.join(__dirname, '..', 'data')
-const STORE = path.join(DATA_DIR, 'items.json')
 const PORT = process.env.API_PORT || 3001
-
-// Missing file = empty store. A file that exists but can't be parsed is an error: never treat it
-// as empty, or the next save would wipe every item.
-const readJson = (file, empty) => {
-  if (!fs.existsSync(file)) return empty
-  return JSON.parse(fs.readFileSync(file, 'utf8'))
-}
-// Atomic write: write a temp file, then rename over the real one, so a crash can't leave half a file.
-const writeJson = (file, data) => {
-  fs.mkdirSync(DATA_DIR, { recursive: true })
-  const tmp = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2))
-  fs.renameSync(tmp, file)
-}
-const load = () => readJson(STORE, [])
-const save = (items) => {
-  writeJson(STORE, items)
-}
 
 const app = express()
 app.use(express.json({ limit: '20mb' }))
 
+// Wrap async routes so a database error becomes a clear JSON response instead of a hung request.
+const route = (fn) => (req, res) => fn(req, res).catch((e) => {
+  if (e.code === '23505') return res.status(409).json({ errors: { sku: 'This SKU already exists in the system' } })
+  if (e.code === '23514') return res.status(400).json({ error: `Rejected by the database (${e.constraint})` })
+  console.error(e)
+  res.status(500).json({ error: 'Database error: ' + String(e.message || e).slice(0, 200) })
+})
+
+// ---- Item writes. Every change goes through these, so the change log is always complete. ----
+const COLS = [...ITEM_COLUMNS, 'batch_id', 'imported_at', 'updated_at']
+const INSERT = `INSERT INTO items (${COLS.join(', ')}) VALUES (${COLS.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING *`
+const insertRow = async (c, item, { batch_id = null, imported_at = new Date().toISOString(), updated_at = null } = {}) =>
+  fromRow((await c.query(INSERT, [...toValues(item), batch_id, imported_at, updated_at])).rows[0])
+const removeRow = async (c, sku) => {
+  const { rows } = await c.query('DELETE FROM items WHERE sku = $1 RETURNING *', [sku])
+  return rows[0] ? fromRow(rows[0]) : null
+}
+const logChange = (c, { batch_id = null, kind, sku, before, after }) =>
+  c.query('INSERT INTO item_changes (batch_id, kind, sku, before, after) VALUES ($1, $2, $3, $4, $5)',
+    [batch_id, kind, sku, before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null])
+// Writers wait for each other, so the change log order is the real order of changes.
+const lockItems = (c) => c.query('LOCK TABLE items IN SHARE ROW EXCLUSIVE MODE')
+
 app.get('/api/health', (_req, res) => res.json({ ok: true, ai: Boolean(process.env.GROQ_API_KEY) }))
 
 // All items already in the system.
-app.get('/api/items', (_req, res) => res.json(load()))
+app.get('/api/items', route(async (_req, res) => {
+  const { rows } = await pool.query('SELECT * FROM items ORDER BY imported_at, sku')
+  res.json(rows.map(fromRow))
+}))
 
-// Remove everything (handy for demos).
-app.delete('/api/items', (_req, res) => { save([]); saveBatches({}); res.json({ ok: true }) })
+// Remove everything (handy for demos). Also clears upload history.
+app.delete('/api/items', route(async (_req, res) => {
+  await pool.query('TRUNCATE items, item_changes, import_batches')
+  res.json({ ok: true })
+}))
 
 // Edit one imported item. Body: { row } as raw strings (same encoding as the CSV). Re-validated here.
-app.put('/api/items/:sku', (req, res) => {
-  const items = load()
-  const idx = items.findIndex((i) => i.sku === req.params.sku)
-  if (idx < 0) return res.status(404).json({ error: 'Item not found' })
+// The edit detaches the item from its import, so undoing only that import won't delete the edit.
+app.put('/api/items/:sku', route(async (req, res) => {
   const { item, errors } = parseRow(req.body?.row || {})
-  if (item.sku && item.sku !== req.params.sku && items.some((i) => i.sku === item.sku))
-    errors.sku = 'This SKU already exists in the system'
   if (Object.keys(errors).length) return res.status(400).json({ errors })
-  items[idx] = { ...item, imported_at: items[idx].imported_at, updated_at: new Date().toISOString() }
-  save(items)
-  res.json(items[idx])
-})
+  const out = await tx(async (c) => {
+    await lockItems(c)
+    const before = await removeRow(c, req.params.sku)
+    if (!before) return null
+    const after = await insertRow(c, item, { imported_at: before.imported_at, updated_at: new Date().toISOString() })
+    if (item.sku === req.params.sku) await logChange(c, { kind: 'edit', sku: item.sku, before, after })
+    else { // SKU renamed: the old SKU is gone and a new one exists
+      await logChange(c, { kind: 'edit', sku: req.params.sku, before, after: null })
+      await logChange(c, { kind: 'edit', sku: item.sku, before: null, after })
+    }
+    return after
+  })
+  if (!out) return res.status(404).json({ error: 'Item not found' })
+  res.json(out)
+}))
 
 // Delete one imported item.
-app.delete('/api/items/:sku', (req, res) => {
-  const items = load()
-  const next = items.filter((i) => i.sku !== req.params.sku)
-  if (next.length === items.length) return res.status(404).json({ error: 'Item not found' })
-  save(next)
+app.delete('/api/items/:sku', route(async (req, res) => {
+  const ok = await tx(async (c) => {
+    await lockItems(c)
+    const before = await removeRow(c, req.params.sku)
+    if (before) await logChange(c, { kind: 'delete', sku: before.sku, before, after: null })
+    return Boolean(before)
+  })
+  if (!ok) return res.status(404).json({ error: 'Item not found' })
   res.json({ ok: true })
-})
+}))
 
 // Import rows of raw strings. The server re-validates everything: it is the source of truth.
 // Valid rows are saved; invalid rows are returned with reasons. Partial import is intentional.
-const BATCHES = path.join(DATA_DIR, 'batches.json')
-const loadBatches = () => readJson(BATCHES, {})
-const saveBatches = (b) => writeJson(BATCHES, b)
-
-app.post('/api/import', (req, res) => {
+// The whole import is one transaction: either every valid row is saved, or none is.
+app.post('/api/import', route(async (req, res) => {
   if (!Array.isArray(req.body?.rows)) return res.status(400).json({ error: 'Body must be { rows: [...] }' })
   // Anything that isn't a plain object becomes an empty row, so it's rejected with reasons instead of crashing.
   const rows = req.body.rows.map((r) => (r && typeof r === 'object' && !Array.isArray(r) ? r : {}))
-  const updates = new Set(req.body?.updates || []) // SKUs the user chose to update instead of reject
-  const existing = load()
-  const results = validateRows(rows, new Set(existing.map((i) => i.sku).filter((k) => !updates.has(k))))
-  const batch = Date.now().toString(36)
-  const now = new Date().toISOString()
-  const bySku = new Map(existing.map((i) => [i.sku, i]))
-  const imported = []
-  const previous = [] // versions replaced by updates, so undo can restore them
-  const rejected = []
-  results.forEach((r, i) => {
-    if (!r.valid) return rejected.push({ index: i, sku: rows[i].sku, errors: r.errors })
-    const old = bySku.get(r.item.sku)
-    if (old) previous.push(old)
-    bySku.set(r.item.sku, { ...r.item, imported_at: now, batch })
-    imported.push(r.item.sku)
+  const updates = new Set(Array.isArray(req.body?.updates) ? req.body.updates : []) // SKUs the user chose to update instead of reject
+  const files = (Array.isArray(req.body?.files) ? req.body.files : []).filter((f) => typeof f === 'string').map((f) => f.slice(0, 200)).slice(0, 50)
+  const out = await tx(async (c) => {
+    await lockItems(c) // one import at a time, so two imports can't both claim the same new SKU
+    const existing = new Set((await c.query('SELECT sku FROM items')).rows.map((r) => r.sku))
+    const results = validateRows(rows, new Set([...existing].filter((k) => !updates.has(k))))
+    const batch = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+    const now = new Date().toISOString()
+    const mark = (await c.query('SELECT coalesce(max(id), 0) AS m FROM item_changes')).rows[0].m
+    await c.query('INSERT INTO import_batches (id, imported_at, files, after_change) VALUES ($1, $2, $3, $4)', [batch, now, files, mark])
+    const imported = []
+    const rejected = []
+    let updated = 0
+    for (const [i, r] of results.entries()) {
+      if (!r.valid) { rejected.push({ index: i, sku: rows[i].sku, errors: r.errors }); continue }
+      const before = existing.has(r.item.sku) ? await removeRow(c, r.item.sku) : null
+      const after = await insertRow(c, r.item, { batch_id: batch, imported_at: now })
+      await logChange(c, { batch_id: batch, kind: before ? 'update' : 'import', sku: r.item.sku, before, after })
+      if (before) updated++
+      imported.push(r.item.sku)
+    }
+    await c.query('UPDATE import_batches SET added = $2, updated = $3, rejected = $4 WHERE id = $1',
+      [batch, imported.length - updated, updated, rejected.length])
+    return { imported, updated, rejected, total: rows.length, batch }
   })
-  save([...bySku.values()])
-  const batches = loadBatches()
-  batches[batch] = { at: now, skus: imported, previous }
-  saveBatches(batches)
-  res.json({ imported, updated: previous.length, rejected, total: rows.length, batch })
-})
+  res.json(out)
+}))
 
-// Undo an import: remove what it added and restore what it overwrote.
-app.post('/api/import/:batch/undo', (req, res) => {
-  const batches = loadBatches()
-  const b = Object.hasOwn(batches, req.params.batch) ? batches[req.params.batch] : null
-  if (!b) return res.status(404).json({ error: 'Import not found (already undone?)' })
-  const skus = new Set(b.skus)
-  const kept = load().filter((i) => !(skus.has(i.sku) && i.batch === req.params.batch))
-  // Only restore an old version if nothing else now uses that SKU (a later edit/import may have).
-  const present = new Set(kept.map((i) => i.sku))
-  save([...kept, ...b.previous.filter((p) => !present.has(p.sku))])
-  delete batches[req.params.batch]
-  saveBatches(batches)
-  res.json({ ok: true, removed: b.skus.length, restored: b.previous.length })
-})
+// Upload history, newest first. For each upload: what restoring to before it would also undo.
+app.get('/api/batches', route(async (_req, res) => {
+  const { rows } = await pool.query(`
+    SELECT b.id, b.seq, b.imported_at, b.files, b.added, b.updated, b.rejected,
+      (SELECT count(*) FROM import_batches l WHERE l.seq > b.seq)::int AS later_uploads,
+      -- one edit/delete = one transaction = one now(); a rename logs two rows but is one edit
+      (SELECT count(DISTINCT ch.at) FROM item_changes ch WHERE ch.id > b.after_change AND ch.batch_id IS NULL)::int AS later_edits
+    FROM import_batches b ORDER BY b.seq DESC`)
+  res.json(rows.map((r) => ({ ...r, seq: Number(r.seq), imported_at: r.imported_at.toISOString() })))
+}))
+
+// Restore to before an upload: replay the change log backwards to just before it.
+// That upload, every later upload, and every edit/delete made since are undone, in one transaction.
+async function restoreBefore(id) {
+  return tx(async (c) => {
+    await lockItems(c)
+    const b = (await c.query('SELECT seq, after_change FROM import_batches WHERE id = $1', [id])).rows[0]
+    if (!b) return null
+    const changes = (await c.query('SELECT sku, before FROM item_changes WHERE id > $1 ORDER BY id DESC', [b.after_change])).rows
+    const keep = await c.query('SELECT id FROM import_batches WHERE seq < $1', [b.seq])
+    const surviving = new Set(keep.rows.map((r) => r.id))
+    for (const ch of changes) {
+      await removeRow(c, ch.sku)
+      if (ch.before) {
+        const p = ch.before
+        await insertRow(c, p, { batch_id: surviving.has(p.batch) ? p.batch : null, imported_at: p.imported_at, updated_at: p.updated_at ?? null })
+      }
+    }
+    // Safety net: any item still pointing at an upload we're undoing goes too, even if the log has no
+    // record of it (e.g. uploads made before the change log existed). Without this they'd be left behind.
+    const orphans = await c.query('DELETE FROM items WHERE batch_id IN (SELECT id FROM import_batches WHERE seq >= $1)', [b.seq])
+    await c.query('DELETE FROM item_changes WHERE id > $1', [b.after_change])
+    const gone = await c.query('DELETE FROM import_batches WHERE seq >= $1', [b.seq])
+    if (orphans.rowCount) console.warn(`Restore ${id}: removed ${orphans.rowCount} item(s) that had no change-log record`)
+    return { ok: true, uploadsUndone: gone.rowCount, changesUndone: changes.length }
+  })
+}
+app.post('/api/batches/:id/restore', route(async (req, res) => {
+  const out = await restoreBefore(req.params.id)
+  if (!out) return res.status(404).json({ error: 'Upload not found (already undone?)' })
+  res.json(out)
+}))
+// "Undo this import" on the results page: the same thing, right after the import.
+app.post('/api/import/:batch/undo', route(async (req, res) => {
+  const out = await restoreBefore(req.params.batch)
+  if (!out) return res.status(404).json({ error: 'Import not found (already undone?)' })
+  res.json(out)
+}))
 
 
 // ---- AI suggestions for rows that still have errors ----
@@ -209,4 +261,12 @@ Reply as {"mappings":[{"header":"<header>","field":"<field key or null>",${multi
 })
 
 // Localhost only: no auth, so never expose the API (or the AI key's spend) to the network.
+try {
+  await migrate()
+} catch (e) {
+  console.error(`\nCan't reach the database (${e.code || e.message}).`)
+  console.error('Start Postgres with:  brew services start postgresql@18')
+  console.error('Create the database:  createdb sutton   (or set DATABASE_URL in .env)\n')
+  process.exit(1)
+}
 app.listen(PORT, '127.0.0.1', () => console.log(`API listening on http://127.0.0.1:${PORT}`))
