@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import express from 'express'
+import { pathToFileURL } from 'node:url'
 import { validateRows, parseRow, CATEGORIES, UOMS, FIELDS } from '../shared/schema.js'
 import { askJson } from './ai.js'
 import { pool, tx, migrate, fromRow, toValues, ITEM_COLUMNS } from './db.js'
@@ -306,13 +307,18 @@ Reply as {"mappings":[{"header":"<header>","field":"<field key or null>",${multi
   }
 })
 
+export { app }
+
+// Start the server only when run directly (`node server/index.js`), not when tests import the app.
 // Localhost only. Sign-in protects the data, but there's no HTTPS here, so don't expose the API to the network as is.
-try {
-  await migrate()
-} catch (e) {
-  console.error(`\nCan't reach the database (${e.code || e.message}).`)
-  console.error('Start Postgres with:  brew services start postgresql@18')
-  console.error('Create the database:  createdb sutton   (or set DATABASE_URL in .env)\n')
-  process.exit(1)
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    await migrate()
+  } catch (e) {
+    console.error(`\nCan't reach the database (${e.code || e.message}).`)
+    console.error('Start Postgres with:  brew services start postgresql@18')
+    console.error('Create the database:  createdb sutton   (or set DATABASE_URL in .env)\n')
+    process.exit(1)
+  }
+  app.listen(PORT, '127.0.0.1', () => console.log(`API listening on http://127.0.0.1:${PORT}`))
 }
-app.listen(PORT, '127.0.0.1', () => console.log(`API listening on http://127.0.0.1:${PORT}`))

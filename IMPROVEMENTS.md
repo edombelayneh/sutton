@@ -9,7 +9,7 @@ New entries are added only after the owner approves them.
 | 2 | No "imported by" record | You can't tell who imported a batch or filter imports by employee | Done |
 | 3 | Multi-file uploads repeat headers and drop data | Headers are merged only when the text matches exactly, so `SKU`, `SKU ` and `sku` show up as separate rows on the Map step. Only one of them gets mapped to the SKU field, so the **other files' rows lose their SKU values** | Done |
 | 4 | Data is stored in JSON files | A JSON file doesn't scale, has no real queries or relations, and can't safely handle several users at once. Employees (#1) and audit data (#2) make this more pressing | Done |
-| 5 | No automated tests | Bugs like the multi-file SKU loss (#3) went unnoticed because nothing checks behavior automatically. Every change risks breaking import, auto-fix or validation without anyone knowing | Planned |
+| 5 | No automated tests | Bugs like the multi-file SKU loss (#3) went unnoticed because nothing checks behavior automatically. Every change risks breaking import, auto-fix or validation without anyone knowing | Done |
 | 6 | No way back to an earlier upload | "Undo this import" only existed on the results page right after importing. Once you left, a bad upload (or the edits after it) couldn't be rolled back | Done |
 
 ---
@@ -77,6 +77,15 @@ These aren't alternatives. **PostgreSQL is a database** (it replaces the JSON fi
 - **Plan:** Vitest (it fits with Vite, so there's nothing extra to configure). Run with `npm test`.
 - **Cover first:** the pure logic in `shared/` (header mapping, `combineFiles`, validation, auto-fix) using the sample files, then the API routes (import, undo, update, and auth once #1 lands).
 - Every bug we fix gets a test that would have caught it.
+- **Done:** `npm test` (Vitest) runs 60 tests in about 3 seconds:
+  - `tests/unit/columns.test.js`: column mapping and multi-file merging, including the regression test for #3 (the second file losing its SKUs).
+  - `tests/api/items.test.js`: import, update, edit, delete, clear all, simultaneous imports, and the rules the database enforces.
+  - `tests/api/history.test.js`: undo and "restore to before", including the regression test for items left behind after a restore.
+  - `tests/api/auth.test.js`: every route locked, sign-in by ID or email, cookies, logout, expiry, deactivate, lockout.
+  - `tests/api/imported-by.test.js`: who imported, edited and deleted, with fake values from the browser ignored.
+  - `tests/api/employees-cli.test.js`: the `npm run employee` script.
+- API tests start the real server on a random port against **`sutton_test`**. They refuse to run against any database whose name doesn't end in `_test`, and they never call the real AI.
+- **Not covered yet:** the React screens (that would need browser tests, e.g. Playwright), and the AI prompts themselves.
 
 ## 6. Upload history + "Restore to before this"
 - **Imported items → Upload history** tab lists every upload, newest first: when, which files, how many were added, updated and not imported.

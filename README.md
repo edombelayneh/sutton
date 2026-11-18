@@ -15,6 +15,8 @@ npm run employee -- add --id E1001 --name "Your Name" --email you@company.com   
 npm run dev
 ```
 
+**Run the tests:** `npm test` (60 tests, about 3 seconds). They use a separate `sutton_test` database, created automatically, and never touch your data or call the AI.
+
 Sign in with your **email or employee ID** and the password you chose. There's no sign-up page: add, reset or block people with `npm run employee -- add | password <id> | deactivate <id> | activate <id> | list` (see `server/employees.js`).
 
 The server creates its tables on startup (`migrations/*.sql`). To use a different database, set `DATABASE_URL` in `.env` (default `postgres://localhost/sutton`).

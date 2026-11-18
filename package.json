@@ -7,6 +7,8 @@
     "dev": "concurrently -k -n api,web -c blue,green \"node --watch server/index.js\" \"vite\"",
     "build": "vite build",
     "lint": "oxlint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "employee": "node server/employees.js",
     "preview": "vite preview",
     "zip": "rm -f ../sutton-submission.zip && zip -rq ../sutton-submission.zip . -x 'node_modules/*' 'dist/*' '.env' '*.DS_Store' && echo 'Created ../sutton-submission.zip'"
@@ -28,6 +30,7 @@
     "concurrently": "^10.0.7",
     "oxlint": "^1.90.0",
     "tailwindcss": "^4.3.5",
-    "vite": "^8.3.6"
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0"
   }
 }

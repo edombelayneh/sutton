@@ -2,6 +2,13 @@
 
 Newest entries at the top.
 
+## Automated tests: `npm test`
+- **60 Vitest tests** in `tests/`: column mapping and multi-file merging (unit), plus API tests for import, edit/delete, the database's own rules, undo and restore-to-before, sign-in and lockout, "imported by", and the `npm run employee` script.
+- The API tests start the real server on a random port against a separate **`sutton_test`** database (created automatically). They refuse to run against a database whose name doesn't end in `_test`, and they never call the AI.
+- Includes regression tests for the bugs fixed so far: the second file losing its SKUs, and items left behind after a restore.
+- `server/index.js` now exports the app and only starts listening when run directly, so tests can import it.
+- Why: gap #5 in IMPROVEMENTS.md. The multi-file SKU bug went unnoticed because nothing checked automatically.
+
 ## "Imported by": who did what
 - Every upload and item now records **who imported it**, and items also record **who last edited them** (`migrations/004_imported_by.sql`). The server takes this from the signed-in session; the browser can't set it.
 - **Imported items:** a new "Imported by" column, an **Imported by** filter (Everyone or one employee), and search now also matches an employee's name or ID. Item details show who imported it and who last edited it, and when.
