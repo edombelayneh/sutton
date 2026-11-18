@@ -2,6 +2,25 @@
 
 Newest entries at the top.
 
+## Multiple files: AI merges columns that mean the same thing
+- On top of merging by spelling, columns from different files now merge when they **map to the same field** (`SKU` and `Item Code`), or when **AI judges they hold the same data**, based on the header and sample values (`Part #` = `SKU`, `Grp` = `Category`, `Std Cost` = `Unit Cost ($)`).
+- The Map step shows each merge: ✓ green when we matched it ourselves, 🤖 purple with the AI's reason. Two columns from the same file are never merged.
+- While the AI works, the dropdowns are locked (about 1–7 seconds), and a late AI reply for an upload you've already replaced is ignored.
+- Result on the messy + odd-headers samples together: **29 columns → 16** (one per field, plus `Internal Notes`).
+- Why: the owner wants columns that hold the same data merged even when their names differ, using AI when the simple checks aren't enough.
+
+## AI provider: OpenRouter → Groq
+- The AI features now use **Groq** (`GROQ_API_KEY` in `.env`), through its OpenAI-compatible endpoint. The default model is `openai/gpt-oss-120b`, and `AI_MODEL` still overrides it.
+- Why: the owner switched to a Groq key. A test call mapped `Part #` → `sku` in about 0.6 seconds.
+
+## Multiple files: one column per field, no lost data
+- **Look-alike headers across files (`SKU`, `SKU `, `sku`) are now one row on the Map step**, showing which files it comes from and how each file spells it.
+- **Different files can map different columns to the same field** (e.g. `SKU` in one file, `Item Code` in another). Within a single file, a field can still only be used once.
+- **Bug fixed:** before, only the first file's SKU column got mapped and **every other file's rows imported with a blank SKU**. Also, a column from one file could blank out another file's value.
+- The example value now comes from the first row that has one, instead of always row 1 (which might be from a different file).
+- AI column matching treats a field as taken only if every file already has it.
+- Why: gap #3 in IMPROVEMENTS.md. Uploading several files should give the same result as uploading them one at a time.
+
 ## Landing: the whole page moves
 - **Mouse parallax**: the aurora glows, the 3D sheet and the live-preview card shift at different depths as the cursor moves; **the drop zone tilts toward the cursor** in 3D.
 - **Rotating headline word**: "We'll handle the mess. / typos. / duplicates. / $ signs. / dates. / Excel quirks."

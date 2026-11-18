@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
-import { FIELDS, FIELD_KEYS, autoMapHeaders, applyMapping, validateRows, parseRow } from '../shared/schema.js'
+import { FIELDS, FIELD_KEYS, applyMapping, validateRows, parseRow, combineFiles, autoMapColumns, canMapColumn, mergeColumns, mergeByField } from '../shared/schema.js'
 import { autoFixRow, generateSku } from '../shared/autofix.js'
 import { createPortal } from 'react-dom'
 import { EditPanel, CAT_LABEL, FIELD_LABEL, money, count, sizeText, vendorsText } from './review-ui.jsx'
@@ -23,7 +23,7 @@ const STEPS = ['Upload', 'Map columns', 'Review & fix', 'Results']
 export default function App() {
   const [step, setStep] = useState(0)
   const [fileName, setFileName] = useState('')
-  const [headers, setHeaders] = useState([])
+  const [columns, setColumns] = useState([]) // [{ name, files, variants }]
   const [csvRows, setCsvRows] = useState([])
   const [mapping, setMapping] = useState({})
   const [rows, setRows] = useState([]) // raw strings per field, editable
@@ -37,19 +37,20 @@ export default function App() {
 
   const loadText = (text, name) => loadFiles([{ text, name }])
   // One or more files become one combined batch; each row remembers its source file.
+  const loadId = useRef(0) // ignore AI replies for an upload the user has already replaced
   const loadFiles = (files) => {
-    const hs = []
-    const all = []
-    for (const { text, name } of files) {
-      const parsed = Papa.parse(text, { header: true, skipEmptyLines: 'greedy' })
-      for (const h of parsed.meta.fields || []) if (h !== '' && !hs.includes(h)) hs.push(h)
-      for (const r of parsed.data) all.push({ ...r, __file: name })
-    }
-    const parsed = { data: all }
+    const id = ++loadId.current
+    // 1. Headers that look alike across files ("SKU", "SKU ", "sku") become one column.
+    const combined = combineFiles(files.map(({ text, name }) => {
+      const p = Papa.parse(text, { header: true, skipEmptyLines: 'greedy' })
+      return { name, fields: p.meta.fields, data: p.data }
+    }))
+    // 2. Different names that our aliases place on the same field ("SKU" in one file, "Item Code" in another) merge too.
+    const { columns: cols, rows: all, mapping: auto } = mergeByField(combined.columns, combined.rows, autoMapColumns(combined.columns))
+    const hs = cols.map((c) => c.name)
     setFileName(files.length > 1 ? `${files.length} files` : files[0].name)
-    setHeaders(hs)
+    setColumns(cols)
     setCsvRows(all)
-    const auto = autoMapHeaders(hs)
     setMapping(auto)
     setResult(null)
     setStep(1)
@@ -60,24 +61,34 @@ export default function App() {
     fetch('/api/ai/map', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        unmapped: unmapped.map((h) => ({ header: h, samples: parsed.data.map((r) => r[h]).filter(Boolean).slice(0, 3) })),
-        used: Object.values(auto).filter(Boolean),
+        unmapped: unmapped.map((h) => ({ header: h, files: cols.find((c) => c.name === h).files, samples: all.map((r) => r[h]).filter(Boolean).slice(0, 3) })),
+        // 3. With several files, AI also checks whether a leftover column is the same data as another file's column.
+        others: cols.map((c) => c.name).filter((h) => !unmapped.includes(h))
+          .map((h) => ({ header: h, files: cols.find((c) => c.name === h).files, samples: all.map((r) => r[h]).filter(Boolean).slice(0, 3) })),
+        // A field only counts as taken if every file already has it mapped (file B can still use SKU when only file A has it).
+        used: FIELD_KEYS.filter((k) => [...new Set(cols.flatMap((c) => c.files))].every((f) => cols.some((c) => auto[c.name] === k && c.files.includes(f)))),
       }),
     })
       .then(async (r) => {
         const data = await r.json()
+        if (id !== loadId.current) return
         if (!r.ok) throw new Error(data.error)
         const notes = {}
         for (const m of data.mappings) notes[m.header] = m
-        setMapping((cur) => {
-          const next = { ...cur }
-          const used = new Set(Object.values(next).filter(Boolean))
-          for (const m of data.mappings) if (m.field && !next[m.header] && !used.has(m.field)) { next[m.header] = m.field; used.add(m.field) }
-          return next
-        })
+        // AI field picks first, then merge: columns AI says are the same, and columns now on the same field.
+        const next = { ...auto }
+        for (const m of data.mappings) if (m.field && !next[m.header] && canMapColumn(next, cols, m.header, m.field)) next[m.header] = m.field
+        const pairs = data.mappings.filter((m) => m.same_as).map((m) => ({ keep: m.same_as, drop: m.header, by: 'ai', why: m.why }))
+        const viaAi = mergeColumns(cols, all, next, pairs)
+        const final = mergeByField(viaAi.columns, viaAi.rows, viaAi.mapping)
+        // Same-field merges of AI-mapped columns count as AI merges.
+        for (const c of final.columns) for (const g of c.merged || []) if (g.by === 'match' && notes[g.name]?.field) { g.by = 'ai'; g.why = notes[g.name].why }
+        setColumns(final.columns)
+        setCsvRows(final.rows)
+        setMapping(final.mapping)
         setAiMap({ busy: false, notes, msg: '' })
       })
-      .catch((e) => setAiMap({ busy: false, notes: {}, msg: /AI is off/.test(e.message) ? 'off' : e.message }))
+      .catch((e) => id === loadId.current && setAiMap({ busy: false, notes: {}, msg: /AI is off/.test(e.message) ? 'off' : e.message }))
   }
 
   const confirmMapping = () => {
@@ -129,7 +140,7 @@ export default function App() {
       <main key={step} className="max-w-6xl mx-auto px-6 py-8 animate-rise">
         {step === 0 && <Upload onText={loadText} onFiles={loadFiles} existingCount={existingSkus.size} onViewItems={() => setShowItems(true)} />}
         {step === 1 && (
-          <MapColumns aiMap={aiMap} fileName={fileName} headers={headers} sample={csvRows[0]} mapping={mapping}
+          <MapColumns aiMap={aiMap} fileName={fileName} columns={columns} rows={csvRows} mapping={mapping}
             setMapping={setMapping} onBack={() => setStep(0)} onNext={confirmMapping} />
         )}
         {step === 2 && (
@@ -306,8 +317,10 @@ function Upload({ onText, onFiles, existingCount, onViewItems }) {
   )
 }
 
-function MapColumns({ aiMap, fileName, headers, sample, mapping, setMapping, onBack, onNext }) {
+function MapColumns({ aiMap, fileName, columns, rows, mapping, setMapping, onBack, onNext }) {
   const used = Object.values(mapping).filter(Boolean)
+  const multi = new Set(columns.flatMap((c) => c.files)).size > 1
+  const example = (h) => rows.find((r) => r[h] != null && String(r[h]).trim() !== '')?.[h] ?? ''
   const missingRequired = FIELDS.filter((f) => f.required && !used.includes(f.key))
   return (
     <div className="space-y-4">
@@ -318,16 +331,25 @@ function MapColumns({ aiMap, fileName, headers, sample, mapping, setMapping, onB
       <table className="w-full bg-white rounded-2xl border border-slate-200 shadow-sm text-sm overflow-hidden">
         <thead className="text-left text-slate-500 bg-slate-50"><tr><th className="p-3 label font-normal">Your column</th><th className="p-3 label font-normal">Example value</th><th className="p-3 label font-normal">Imports as</th></tr></thead>
         <tbody>
-          {headers.map((h) => (
+          {columns.map(({ name: h, files, variants, merged = [] }) => (
             <tr key={h} className="border-t">
-              <td className="p-3 font-mono">{h}</td>
-              <td className="p-3 text-slate-500 truncate max-w-xs">{String(sample?.[h] ?? '').slice(0, 60)}</td>
               <td className="p-3">
-                <select className="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-violet-400" value={mapping[h] ?? ''}
+                <div className="font-mono">{h}</div>
+                {multi && <div className="text-xs text-slate-500 mt-1">In {files.length === 1 ? files[0] : `${files.length} files: ${files.join(', ')}`}</div>}
+                {variants.length > 1 && <div className="text-xs text-slate-500">Named {variants.map((v) => `"${v}"`).join(', ')}</div>}
+                {merged.map((g) => (
+                  <div key={g.name} className={`text-xs mt-0.5 ${g.by === 'ai' ? 'text-violet-700' : 'text-emerald-700'}`}>
+                    {g.by === 'ai' ? '🤖 AI merged' : '✓ Merged'} "{g.name}" ({g.files.join(', ')}){g.why ? `: ${g.why}` : ''}
+                  </div>
+                ))}
+              </td>
+              <td className="p-3 text-slate-500 truncate max-w-xs">{String(example(h)).slice(0, 60)}</td>
+              <td className="p-3">
+                <select disabled={aiMap.busy} className="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:opacity-50" value={mapping[h] ?? ''}
                   onChange={(e) => setMapping({ ...mapping, [h]: e.target.value || null })}>
                   <option value="">— Don't import —</option>
                   {FIELDS.map((f) => (
-                    <option key={f.key} value={f.key} disabled={used.includes(f.key) && mapping[h] !== f.key}>
+                    <option key={f.key} value={f.key} disabled={mapping[h] !== f.key && !canMapColumn(mapping, columns, h, f.key)}>
                       {f.label}{f.required ? ' *' : ''}
                     </option>
                   ))}
@@ -599,7 +621,7 @@ function Review({ rows, setRows, existingSkus, onBack, onImported }) {
           </div>
         </div>
         {(ai.msg || (!aiOn && aiTargets.length > 0)) && (
-          <p className="text-xs text-violet-700">{ai.msg || 'AI suggestions are off (add OPENROUTER_API_KEY to .env). You can still fix rows by hand.'}</p>
+          <p className="text-xs text-violet-700">{ai.msg || 'AI suggestions are off (add GROQ_API_KEY to .env). You can still fix rows by hand.'}</p>
         )}
         {checkTotal > 0 && <p className="text-xs text-amber-700">{checkTotal} of our fixes were guesses (e.g. ambiguous dates). Confirm them before they import.</p>}
         <div className="flex flex-wrap gap-1.5 border-t border-slate-100 pt-4">

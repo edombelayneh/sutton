@@ -19,8 +19,8 @@ This starts the web app and the API together. The browser opens **http://localho
 
 ```bash
 cp .env.example .env
-# then edit .env:  OPENROUTER_API_KEY=sk-or-...
-# optional:        AI_MODEL=<any OpenRouter model id>   (default: openrouter/auto)
+# then edit .env:  GROQ_API_KEY=gsk_...
+# optional:        AI_MODEL=<any Groq model id>   (default: openai/gpt-oss-120b)
 ```
 
 Restart `npm run dev` after adding the key. **Without a key everything works**; only the two AI helpers (column matching for odd headers and "Ask AI to fix") are turned off.
@@ -50,7 +50,7 @@ Restart `npm run dev` after adding the key. **Without a key everything works**; 
 | Validation rules | `shared/schema.js` | One module used by **both** the browser (instant feedback) and the server (source of truth). All field rules plus cross-row rules (unique SKU in the file *and* the store, ≤ 1 preferred vendor, discontinued ⇒ inactive). |
 | Safe auto-fixes | `shared/autofix.js` | Deterministic; each fix records `from`, `to`, `why` and whether it's a guess. Also the SKU generator. |
 | API + store | `server/index.js` | Express. `GET/DELETE /api/items`, `POST /api/import`, `POST /api/import/:batch/undo`, `PUT/DELETE /api/items/:sku`, `POST /api/ai/map`, `POST /api/ai/suggest`. Items are stored in `data/items.json` (plus `data/batches.json` for undo), written atomically, gitignored. The API listens on **127.0.0.1 only**. |
-| AI client | `server/ai.js` | The provided OpenRouter helper. Called **only from the server**, so the key never reaches the browser. |
+| AI client | `server/ai.js` | A small Groq client (OpenAI-compatible). Called **only from the server**, so the key never reaches the browser. |
 | UI | `src/App.jsx`, `src/review-ui.jsx` | React + Tailwind v4. |
 | Samples | `samples/`, `public/samples/` | `items_clean.csv`, `items_messy.csv`, `items_odd_headers.csv` (for AI header matching), `schema.json`. |
 
@@ -61,7 +61,7 @@ Stack: **Vite + React + Tailwind v4 + Express**. It was chosen for near-zero set
 **Works and tested:** the full flow on both samples. Validation of every schema rule; auto-fixes (the clean file gets 0 changes, as it should); the duplicate resolver; partial import with server re-validation; SKUs already in the store are caught; rejected-rows CSV; imported-items search, edit and delete; back navigation.
 
 **Known gaps:**
-- **AI quality depends on the model.** `openrouter/auto` picks the model; set `AI_MODEL` for consistency. AI suggestions are always gated behind *Keep*, so a bad suggestion can't import on its own.
+- **AI quality depends on the model.** The default is `openai/gpt-oss-120b` on Groq; set `AI_MODEL` to try another. AI suggestions are always gated behind *Keep*, so a bad suggestion can't import on its own.
 - **Undo covers whole imports only**; manual edits in Imported items aren't versioned (`updated_at` is recorded).
 - **Excel: first sheet only.** Updating an existing item shows a chip, not a field-by-field before → after diff yet.
 - **Ambiguous dates** assume US `MM/DD/YYYY` (flagged for the user to confirm); there's no locale setting.

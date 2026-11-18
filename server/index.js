@@ -32,7 +32,7 @@ const save = (items) => {
 const app = express()
 app.use(express.json({ limit: '20mb' }))
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, ai: Boolean(process.env.OPENROUTER_API_KEY) }))
+app.get('/api/health', (_req, res) => res.json({ ok: true, ai: Boolean(process.env.GROQ_API_KEY) }))
 
 // All items already in the system.
 app.get('/api/items', (_req, res) => res.json(load()))
@@ -113,7 +113,7 @@ app.post('/api/import/:batch/undo', (req, res) => {
 
 
 // ---- AI suggestions for rows that still have errors ----
-const AI_MODEL = process.env.AI_MODEL || 'openrouter/auto'
+const AI_MODEL = process.env.AI_MODEL || 'openai/gpt-oss-120b'
 const AI_MAX_ROWS = 200
 const RULES = `Inventory item fields (CSV cell encoding, all values are strings):
 - sku: ^[A-Z]{4}-[A-Z0-9]{3}$ (e.g. PACK-7Q2)
@@ -145,7 +145,7 @@ Reply as {"suggestions":[{"index":<row index>,"field":"<field>","value":"<new ce
 }
 
 app.post('/api/ai/suggest', async (req, res) => {
-  if (!process.env.OPENROUTER_API_KEY) return res.status(503).json({ error: 'AI is off: add OPENROUTER_API_KEY to .env and restart' })
+  if (!process.env.GROQ_API_KEY) return res.status(503).json({ error: 'AI is off: add GROQ_API_KEY to .env and restart' })
   if (!Array.isArray(req.body?.rows)) return res.status(400).json({ error: 'Body must be { rows: [{ index, row, errors }] }' })
   const rows = req.body.rows.filter((r) => r && typeof r === 'object').slice(0, AI_MAX_ROWS) // cap cost per request
   const batches = []
@@ -163,28 +163,44 @@ app.post('/api/ai/suggest', async (req, res) => {
 
 // ---- AI header mapping fallback: only for headers our alias matching couldn't place ----
 app.post('/api/ai/map', async (req, res) => {
-  if (!process.env.OPENROUTER_API_KEY) return res.status(503).json({ error: 'AI is off' })
-  const { unmapped, used = [] } = req.body || {}
+  if (!process.env.GROQ_API_KEY) return res.status(503).json({ error: 'AI is off' })
+  const { unmapped, used = [], others = [] } = req.body || {}
   if (!Array.isArray(unmapped) || !unmapped.length) return res.json({ mappings: [] })
   const free = FIELDS.filter((f) => !used.includes(f.key))
+  const all = [...unmapped, ...(Array.isArray(others) ? others : [])].slice(0, 100)
+  const filesOf = (h) => all.find((c) => c.header === h)?.files || []
+  const multi = new Set(all.flatMap((c) => c.files || [])).size > 1
   const prompt = `${RULES}
 
-A warehouse admin uploaded a spreadsheet. These columns could not be matched automatically.
+A warehouse admin uploaded ${multi ? 'several spreadsheets' : 'a spreadsheet'}. These columns could not be matched automatically.
 For each column, pick the ONE field it most likely holds, judging by its header AND its sample values, or null if it fits none
-(e.g. internal notes, row ids, totals). Each field can be used at most once. Only choose from these unused fields:
+(e.g. internal notes, row ids, totals). Each field can be used at most once. Only choose from these fields:
 ${free.map((f) => `- ${f.key} (${f.label})`).join('\n')}
-
-Columns:
+${multi ? `
+The files may name the same column differently (capitalization, abbreviations, synonyms: "Part #" vs "SKU", "Supplier" vs "Vendor").
+Also set "same_as" to the header of a column from a DIFFERENT file that holds the same kind of data (compare the sample values,
+not just the names), or null. Never pick a column that shares a file with this one.
+A field already used by a column in another file is NOT used up: if this column holds the same data, give that field AND same_as
+(e.g. "Item Description Short" with short product titles is name, same_as "Item Name").
+If a column has no sample values, judge by its name alone (e.g. "Date Out" is discontinued_on).
+Other columns:
+${JSON.stringify(others)}
+` : ''}
+Columns to place:
 ${JSON.stringify(unmapped)}
 
-Reply as {"mappings":[{"header":"<header>","field":"<field key or null>","why":"<under 10 words>"}]}`
+Reply as {"mappings":[{"header":"<header>","field":"<field key or null>",${multi ? '"same_as":"<header or null>",' : ''}"why":"<under 10 words>"}]}`
   try {
     const out = await askJson(prompt, { model: AI_MODEL, temperature: 0 })
     const taken = new Set(used)
     const mappings = (out?.mappings || []).map((m) => {
       const ok = m.field && free.some((f) => f.key === m.field) && !taken.has(m.field)
       if (ok) taken.add(m.field)
-      return { header: m.header, field: ok ? m.field : null, why: m.why || '' }
+      // same_as must be a real column that shares no file with this one.
+      const mine = filesOf(m.header)
+      const same = multi && m.same_as && m.same_as !== m.header && all.some((c) => c.header === m.same_as)
+        && !filesOf(m.same_as).some((f) => mine.includes(f)) ? m.same_as : null
+      return { header: m.header, field: ok ? m.field : null, same_as: same, why: m.why || '' }
     })
     res.json({ mappings })
   } catch (e) {

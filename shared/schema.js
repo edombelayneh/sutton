@@ -50,11 +50,121 @@ export function autoMapHeaders(headers) {
   return mapping
 }
 
+// ---- Multiple files ----
+// "SKU", "SKU " and "sku" in different files are the same column. Grouping is deliberately
+// gentler than normalizeHeader, so "Size (cm)" and "Size (in)" stay separate columns.
+export const columnKey = (h) => String(h ?? '').trim().toLowerCase().replace(/[\s_\-]+/g, ' ')
+
+/**
+ * Combine parsed files into one batch with one column per header variant group.
+ * files: [{ name, fields: [header], data: [row] }]
+ * Returns { columns: [{ name, files: [fileName], variants: [header] }], rows: [{ [column.name]: value, __file }] }
+ */
+export function combineFiles(files) {
+  const columns = []
+  const byKey = new Map()
+  const rows = []
+  for (const { name, fields, data } of files) {
+    const rename = {} // this file's header -> column name
+    const taken = new Set() // column names already claimed in this file
+    for (const h of fields || []) {
+      if (h === '' || h == null) continue
+      const k = columnKey(h)
+      let col = byKey.get(k)
+      // Same file has two headers that look alike (e.g. "SKU" and "sku "): keep them apart.
+      if (col && taken.has(col.name)) col = null
+      if (!col) {
+        let display = String(h).trim() || String(h)
+        while (columns.some((c) => c.name === display)) display += ' ' // unique display name
+        col = { name: display, files: [], variants: [] }
+        columns.push(col)
+        if (!byKey.has(k)) byKey.set(k, col)
+      }
+      if (!col.files.includes(name)) col.files.push(name)
+      if (!col.variants.includes(h)) col.variants.push(h)
+      rename[h] = col.name
+      taken.add(col.name)
+    }
+    for (const r of data) {
+      const out = { __file: name }
+      for (const [h, v] of Object.entries(r)) if (rename[h] !== undefined) out[rename[h]] = v
+      rows.push(out)
+    }
+  }
+  return { columns, rows }
+}
+
+/** Two columns may map to the same field only if no file contains both. */
+export function canMapColumn(mapping, columns, colName, field) {
+  if (!field) return true
+  const mine = columns.find((c) => c.name === colName)?.files || []
+  return !columns.some((c) => c.name !== colName && mapping[c.name] === field && c.files.some((f) => mine.includes(f)))
+}
+
+/** Auto-map each file on its own (so every file can claim SKU etc.), then merge. */
+export function autoMapColumns(columns) {
+  const mapping = Object.fromEntries(columns.map((c) => [c.name, null]))
+  const fileNames = [...new Set(columns.flatMap((c) => c.files))]
+  for (const file of fileNames) {
+    const cols = columns.filter((c) => c.files.includes(file))
+    const auto = autoMapHeaders(cols.map((c) => c.name))
+    for (const c of cols) {
+      if (mapping[c.name] || !auto[c.name]) continue
+      if (canMapColumn(mapping, columns, c.name, auto[c.name])) mapping[c.name] = auto[c.name]
+    }
+  }
+  return mapping
+}
+
+const shareFile = (a, b) => a.files.some((f) => b.files.includes(f))
+
+/**
+ * Merge columns into one. pairs: [{ keep, drop, by: 'match' | 'ai', why }].
+ * A pair is skipped if both columns appear in the same file (that would mix two real columns).
+ * Returns new { columns, rows, mapping }; every row's value moves to the kept column's name.
+ */
+export function mergeColumns(columns, rows, mapping, pairs) {
+  let cols = columns.map((c) => ({ ...c, files: [...c.files], variants: [...c.variants], merged: [...(c.merged || [])] }))
+  const map = { ...mapping }
+  const renames = {} // dropped column name -> kept column name
+  const find = (n) => { while (renames[n]) n = renames[n]; return n }
+  for (const { keep, drop, by, why } of pairs) {
+    const k = cols.find((c) => c.name === find(keep))
+    const d = cols.find((c) => c.name === find(drop))
+    if (!k || !d || k === d || shareFile(k, d)) continue
+    k.files.push(...d.files)
+    for (const v of d.variants) if (!k.variants.includes(v)) k.variants.push(v)
+    k.merged.push({ name: d.name, files: d.files, by, why: why || '' }, ...d.merged)
+    if (!map[k.name] && map[d.name]) map[k.name] = map[d.name]
+    delete map[d.name]
+    renames[d.name] = k.name
+    cols = cols.filter((c) => c !== d)
+  }
+  if (!Object.keys(renames).length) return { columns, rows, mapping }
+  const out = rows.map((r) => {
+    const o = {}
+    for (const [h, v] of Object.entries(r)) o[h === '__file' ? h : find(h)] = v
+    return o
+  })
+  return { columns: cols, rows: out, mapping: map }
+}
+
+/** Columns from different files that map to the same field are the same column: merge them. */
+export function mergeByField(columns, rows, mapping) {
+  const pairs = []
+  for (const key of FIELD_KEYS) {
+    const same = columns.filter((c) => mapping[c.name] === key)
+    for (const c of same.slice(1)) pairs.push({ keep: same[0].name, drop: c.name, by: 'match', why: `both are ${key}` })
+  }
+  return mergeColumns(columns, rows, mapping, pairs)
+}
+
 /** Turn a parsed CSV row into { fieldKey: rawString } using the mapping. */
 export function applyMapping(row, mapping) {
   const raw = {}
   for (const key of FIELD_KEYS) raw[key] = ''
-  for (const [header, key] of Object.entries(mapping)) if (key) raw[key] = row[header] ?? ''
+  // Only use columns this row actually has, so a column from another file can't blank out the value.
+  for (const [header, key] of Object.entries(mapping)) if (key && row[header] !== undefined && raw[key] === '') raw[key] = row[header] ?? ''
   return raw
 }
 
