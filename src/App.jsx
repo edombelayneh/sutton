@@ -114,7 +114,7 @@ export default function App({ employee, onSignOut }) {
   return (
     <div className="min-h-screen text-slate-900">
       <header className="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-slate-200 text-slate-900">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center gap-8">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center gap-4 xl:gap-8">
           <button className="flex items-center gap-2.5 shrink-0" onClick={() => goTo(0)} title="Back to upload">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
@@ -125,23 +125,23 @@ export default function App({ employee, onSignOut }) {
           <ol className="hidden md:flex items-center gap-1 text-sm ml-auto">
             {STEPS.map((s, i) => (
               <li key={s} className="flex items-center gap-1">
-                {i > 0 && <span className={`w-6 h-px ${i <= step ? 'bg-slate-400' : 'bg-slate-200'}`} />}
+                {i > 0 && <span className={`w-3 xl:w-6 h-px ${i <= step ? 'bg-slate-400' : 'bg-slate-200'}`} />}
                 <button disabled={!(i < step && (step !== 3 || i === 0))} onClick={() => goTo(i)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-colors ${i === step ? 'bg-slate-900 text-white' : i < step ? 'text-slate-600 enabled:hover:bg-slate-100' : 'text-slate-400'}`}>
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full whitespace-nowrap transition-colors ${i === step ? 'bg-slate-900 text-white' : i < step ? 'text-slate-600 enabled:hover:bg-slate-100' : 'text-slate-400'}`}>
                   <span className="font-mono text-[11px]">{i < step ? '✓' : String(i + 1).padStart(2, '0')}</span>{s}
                 </button>
               </li>
             ))}
           </ol>
-          <button onClick={() => setShowItems(true)} className="shrink-0 px-3 py-1.5 rounded-full text-sm border border-slate-200 hover:bg-slate-50 md:ml-2">Imported items <span className="text-slate-400 tabular-nums">{existingSkus.size}</span></button>
+          <button onClick={() => setShowItems(true)} className="shrink-0 whitespace-nowrap px-3 py-1.5 rounded-full text-sm border border-slate-200 hover:bg-slate-50 md:ml-2">Imported items <span className="text-slate-400 tabular-nums">{existingSkus.size}</span></button>
           <span className="md:hidden ml-auto label text-slate-500">{String(step + 1).padStart(2, '0')} / {String(STEPS.length).padStart(2, '0')}</span>
           {employee && (
             <div className="shrink-0 flex items-center gap-2 text-sm">
-              <span className="hidden lg:block text-right leading-tight">
+              <span className="hidden xl:block text-right leading-tight">
                 <span className="block font-medium">{employee.name}</span>
                 <span className="block text-xs text-slate-500">{employee.employee_id}</span>
               </span>
-              <button className="px-3 py-1.5 rounded-full text-slate-600 hover:bg-slate-100" title={`Signed in as ${employee.name} (${employee.email})`}
+              <button className="px-3 py-1.5 rounded-full whitespace-nowrap text-slate-600 hover:bg-slate-100" title={`Signed in as ${employee.name} (${employee.email})`}
                 onClick={() => { if ((step === 1 || step === 2) && !window.confirm('Sign out? Your changes to this import will be lost.')) return; onSignOut() }}>Sign out</button>
             </div>
           )}
@@ -778,19 +778,21 @@ function ImportedItems({ onClose, onChanged, onImportAnother }) {
                 className={`px-3 py-1.5 rounded-md transition-colors ${tab === k ? 'bg-white shadow-sm font-medium text-slate-900' : 'text-slate-500 hover:text-slate-900'}`}>{label}</button>
             ))}
           </div>
-          {tab === 'items' && <PersonFilter people={(items || []).map((it) => it.imported_by)} value={who} onChange={setWho} />}
-          {tab === 'items' && <input autoFocus placeholder="Search SKU, name or employee…" value={q} onChange={(e) => setQ(e.target.value)}
-            className="ml-auto w-72 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />}
-          {tab === 'items' && items?.length > 0 && <button className="px-3 py-2 rounded-lg border border-red-200 text-red-600 text-sm hover:bg-red-50" onClick={clearAll}>Clear all</button>}
-          <button className={`${tab === 'history' ? 'ml-auto ' : ''}px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800`} onClick={onImportAnother}>Import another file</button>
+          <div className="ml-auto flex items-center gap-2">
+            {tab === 'items' && items?.length > 0 && <button className="px-3 py-2 rounded-lg text-sm text-slate-500 hover:text-red-600 hover:bg-red-50" onClick={clearAll}>Clear all</button>}
+            <button className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800" onClick={onImportAnother}>Import another file</button>
+          </div>
         </div>
       </header>
       {tab === 'history' ? <UploadHistory onRestored={() => { setSel(null); reload(); onChanged?.() }} /> : (
       <div className="flex-1 overflow-auto">
         <div className="max-w-6xl mx-auto px-6 py-6">
-        <div className="flex items-center gap-3 mb-3 text-sm text-slate-500">
-          <span>{items ? `${list.length} item${list.length === 1 ? '' : 's'} shown${q || who ? ` (filtered from ${items.length})` : ''}` : ''}</span>
-          <span className="ml-auto"><DownloadItems items={list} name={`inventory-${today()}`} label={q || who ? 'Download these' : 'Download all'} /></span>
+        <div className="flex items-center gap-3 mb-3 flex-wrap">
+          <input autoFocus type="search" placeholder="Search SKU, name or employee…" value={q} onChange={(e) => setQ(e.target.value)}
+            className="w-80 max-w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+          <PersonFilter people={(items || []).map((it) => it.imported_by)} value={who} onChange={setWho} />
+          <span className="ml-auto text-sm text-slate-500">{items ? `${list.length} item${list.length === 1 ? '' : 's'}${q || who ? ` of ${items.length}` : ''}` : ''}</span>
+          <DownloadItems items={list} name={`inventory-${today()}`} label={q || who ? 'Download these' : 'Download all'} />
         </div>
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">

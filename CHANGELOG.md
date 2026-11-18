@@ -2,6 +2,11 @@
 
 Newest entries at the top.
 
+## Tidier headers
+- **Imported items:** the header was one crowded row that wrapped (tabs, filter, search, Clear all, Import). Now the header holds only navigation (Back, title, tabs) and the two page actions (a quieter **Clear all**, **Import another file**). **Search, the Imported by filter, the item count and Download** moved to a toolbar right above the table, matching Upload history.
+- **Main header:** step labels no longer wrap on narrower screens. Spacing tightens below 1280px, and the signed-in name shows next to Sign out only on wide screens (it's always in the Sign out tooltip).
+- Checked with screenshots at 1440px and 1100px.
+
 ## Download: choose your columns
 - **Download…** now opens a panel: pick **CSV or JSON** and **which columns**. That's any schema field, plus audit columns (**Imported by / at, Last edited by / at**) as "Name (ID)" in CSV and `{ employee_id, name }` in JSON. Shortcuts: All / Item fields only / None. The choice is remembered.
 - A warning appears when a required field is left out, because that file can't be imported back as is.
